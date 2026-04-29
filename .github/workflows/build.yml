@@ -73,7 +73,11 @@ jobs:
         run: cmake --preset conan-release
 
       - name: Build
-        run: cmake --build build/Release -j
+        # Cap parallelism to avoid OOM on the ubuntu-latest runner (7 GB
+        # RAM): axapp.cpp pulls in enough wxWidgets template-heavy
+        # headers that 4 of them in flight at once gets the runner
+        # OOM-killed.
+        run: cmake --build build/Release -j 2
 
       - name: Verify binary
         run: |
