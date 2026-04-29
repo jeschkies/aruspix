@@ -19,19 +19,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # wxWidgets, X11, OpenGL, and uuid are system libraries on Linux —
-      # Conan does not provide them. Other platforms get everything from
-      # Conan.
+      # uuid is the only system library Aruspix links directly that Conan
+      # doesn't see. Everything else (GTK, X11, xcb, OpenGL, ...) is
+      # listed by Conan's wxwidgets/xorg/egl/opengl recipes; we let Conan
+      # apt-install those itself further down via the
+      # tools.system.package_manager:mode=install conf.
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            libgtk-3-dev \
-            libgl1-mesa-dev \
-            libglu1-mesa-dev \
-            libuuid1 uuid-dev
+          sudo apt-get install -y uuid-dev
 
       - uses: actions/setup-python@v5
         with:
@@ -58,7 +55,19 @@ jobs:
         run: conan export recipes/im
 
       - name: Install dependencies
-        run: conan install . --build=missing
+        # On Linux, several Conan recipes (xorg, egl, opengl, ...) expect
+        # apt-installed system packages. Switching the package manager
+        # mode from `check` to `install` lets Conan run apt-get itself
+        # so we don't have to keep our own list in sync with the recipes.
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            conan install . --build=missing \
+              -c tools.system.package_manager:mode=install \
+              -c tools.system.package_manager:sudo=True
+          else
+            conan install . --build=missing
+          fi
+        shell: bash
 
       - name: Configure
         run: cmake --preset conan-release
