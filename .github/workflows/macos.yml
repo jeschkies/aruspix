@@ -1,0 +1,61 @@
+name: macOS
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Conan
+        run: pip install --upgrade "conan>=2.0,<3"
+
+      - name: Detect Conan profile
+        run: conan profile detect --force
+
+      # The Conan cache holds downloaded recipes, source archives, and
+      # compiled binary packages. Key it on the recipe files so a change
+      # to the IM recipe or the project requirements triggers a rebuild,
+      # but day-to-day source edits reuse the cache.
+      - name: Cache Conan packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.conan2
+          key: conan-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('conanfile.py', 'recipes/**/conanfile.py') }}
+          restore-keys: |
+            conan-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Export local IM recipe
+        run: conan export recipes/im
+
+      - name: Install dependencies
+        run: conan install . --build=missing
+
+      - name: Configure
+        run: cmake --preset conan-release
+
+      - name: Build
+        run: cmake --build build/Release -j
+
+      - name: Verify binary
+        run: |
+          file build/Release/aruspix
+          build/Release/aruspix --help || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aruspix-macos-${{ runner.arch }}
+          path: build/Release/aruspix
+          if-no-files-found: error
+          retention-days: 14
