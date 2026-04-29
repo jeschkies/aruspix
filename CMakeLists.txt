@@ -5,35 +5,12 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# ---- IM library ---------------------------------------------------------
-# IM is built locally under third_party/im (see scripts/build-im.sh).
-# Tecmake places libs in lib/<TEC_UNAME>/, so locate the subdir at config time.
-set(IM_DIR "${CMAKE_SOURCE_DIR}/third_party/im" CACHE PATH "Path to vendored IM toolkit")
-file(GLOB IM_LIB_DIRS LIST_DIRECTORIES true "${IM_DIR}/lib/*")
-set(IM_LIB_DIR "")
-foreach(d ${IM_LIB_DIRS})
-    if(IS_DIRECTORY "${d}")
-        set(IM_LIB_DIR "${d}")
-        break()
-    endif()
-endforeach()
-if(NOT IM_LIB_DIR)
-    message(FATAL_ERROR "Could not find IM library output under ${IM_DIR}/lib. Run scripts/build-im.sh first.")
-endif()
-message(STATUS "IM_LIB_DIR: ${IM_LIB_DIR}")
-
-find_library(IM_LIBRARY        NAMES im         PATHS "${IM_LIB_DIR}" NO_DEFAULT_PATH REQUIRED)
-find_library(IM_PROCESS_LIBRARY NAMES im_process PATHS "${IM_LIB_DIR}" NO_DEFAULT_PATH REQUIRED)
-find_library(IM_FFTW_LIBRARY    NAMES im_fftw3 im_fftw PATHS "${IM_LIB_DIR}" NO_DEFAULT_PATH REQUIRED)
-
-# ---- wxWidgets ----------------------------------------------------------
-find_package(wxWidgets REQUIRED COMPONENTS base core net html aui)
-include(${wxWidgets_USE_FILE})
-
-# ---- libxml2 ------------------------------------------------------------
+# Dependencies are provided by Conan; see conanfile.py + recipes/im/.
+# Configure with `cmake --preset conan-release` after `conan install`.
+find_package(im REQUIRED)
+find_package(wxWidgets REQUIRED)
 find_package(LibXml2 REQUIRED)
 
-# ---- Sources ------------------------------------------------------------
 set(aruspixSources
     src/app/axabout_wdr.cpp
     src/app/axapp.cpp
@@ -161,8 +138,6 @@ target_include_directories(aruspix PRIVATE
     src/im
     src/ml
     src/mus
-    "${IM_DIR}/include"
-    ${LIBXML2_INCLUDE_DIR}
 )
 
 target_compile_definitions(aruspix PRIVATE
@@ -173,7 +148,6 @@ target_compile_definitions(aruspix PRIVATE
     __AXDEBUG__
     _FILE_OFFSET_BITS=64
     _LARGE_FILES
-    ${LIBXML2_DEFINITIONS}
 )
 
 if(MSVC)
@@ -183,18 +157,13 @@ else()
 endif()
 
 target_link_libraries(aruspix PRIVATE
-    ${IM_LIBRARY}
-    ${IM_PROCESS_LIBRARY}
-    ${IM_FFTW_LIBRARY}
-    ${wxWidgets_LIBRARIES}
-    ${LIBXML2_LIBRARIES}
-    z
+    im::im
+    wxWidgets::wxWidgets
+    LibXml2::LibXml2
 )
 
 if(UNIX AND NOT APPLE)
     target_link_libraries(aruspix PRIVATE pthread uuid)
 elseif(APPLE)
-    # Homebrew FFTW (linked transitively through libim_fftw3.a)
-    target_link_directories(aruspix PRIVATE /opt/homebrew/lib /usr/local/lib)
-    target_link_libraries(aruspix PRIVATE fftw3f fftw3 png jpeg pthread)
+    target_link_libraries(aruspix PRIVATE pthread)
 endif()
