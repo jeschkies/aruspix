@@ -26,8 +26,12 @@ class ImConan(ConanFile):
 
     def requirements(self):
         # IM links against an external libpng (its own libpng sources are
-        # only used on Windows) and an external FFTW for im_fftw3.
+        # only used on Windows), libtiff (bundled in upstream IM but
+        # patched out below so we don't collide with consumers like
+        # wxWidgets that bring their own libtiff), and FFTW for
+        # im_fftw3.
         self.requires("libpng/[>=1.6 <2]", transitive_headers=True)
+        self.requires("libtiff/[>=4.0 <5]", transitive_headers=True)
         self.requires("fftw/[>=3.3 <4]")
 
     def source(self):
@@ -77,6 +81,22 @@ class ImConan(ConanFile):
                 "  endif\n"
                 "endif"
             ),
+        )
+
+        # Patch config.mak: stop compiling the bundled libtiff sources
+        # into libim.a. Upstream IM links its own vendored libtiff
+        # objects, which then collide at consumer link time with the
+        # libtiff.a a tool like wxWidgets pulls in. Keep the bundled
+        # libtiff headers on the include path though — IM's
+        # im_format_tiff.cpp and tiff_binfile.c reach into private
+        # libtiff internals (tiffiop.h) that Conan's libtiff package
+        # does not expose. The actual libtiff symbols come from the
+        # Conan-provided libtiff.a at link time.
+        replace_in_file(
+            self,
+            os.path.join(im_root, "src", "config.mak"),
+            "SRC += $(SRCTIFF) tiff_binfile.c",
+            "SRC += tiff_binfile.c",
         )
 
         # Patch im_fftw3.mak: same idea for FFTW include + lib paths.
