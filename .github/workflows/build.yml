@@ -1,4 +1,4 @@
-name: Linux
+name: Build
 
 on:
   push:
@@ -9,14 +9,21 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
 
       # wxWidgets, X11, OpenGL, and uuid are system libraries on Linux —
-      # Conan won't pull these for us. Everything else comes from Conan.
-      - name: Install system dependencies
+      # Conan does not provide them. Other platforms get everything from
+      # Conan.
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -36,6 +43,9 @@ jobs:
       - name: Detect Conan profile
         run: conan profile detect --force
 
+      # Cache Conan downloads + binary packages. Key on the recipe files
+      # so a change to the IM recipe or project requirements triggers a
+      # rebuild; everyday source edits reuse cached binaries.
       - name: Cache Conan packages
         uses: actions/cache@v4
         with:
@@ -63,7 +73,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: aruspix-linux-${{ runner.arch }}
+          name: aruspix-${{ runner.os }}-${{ runner.arch }}
           path: build/Release/aruspix
           if-no-files-found: error
           retention-days: 14
