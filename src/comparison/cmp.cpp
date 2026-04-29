@@ -281,7 +281,7 @@ void CmpEnv::UpdateTitle( )
 		//	(int)m_cmpCollationPtr->GetMusFile()->m_pages.GetCount()  );
         msg += wxString::Format("- %s", m_cmpCollationPtr->m_name.c_str() );
 
-    SetTitle( _T("%s"), msg.c_str() );
+    SetTitle( msg );
 }
 
 
