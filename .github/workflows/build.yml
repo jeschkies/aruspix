@@ -85,10 +85,11 @@ jobs:
       - name: Build
         run: cmake --build build/Release -j ${{ steps.jobs.outputs.n }}
 
-      - name: Verify binary
-        run: |
-          file build/Release/aruspix
-          build/Release/aruspix --help || true
+      - name: Inspect binary
+        # Just confirm the architecture/format. Don't try to run it: as
+        # a wxWidgets GUI app it hangs on the headless runner waiting
+        # for a display.
+        run: file build/Release/aruspix
 
       - uses: actions/upload-artifact@v4
         with:
