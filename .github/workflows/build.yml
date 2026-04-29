@@ -54,6 +54,14 @@ jobs:
       - name: Export local IM recipe
         run: conan export recipes/im
 
+      - name: Compute build parallelism
+        id: jobs
+        # 2x the logical CPU count, applied to both Conan's tools.build:jobs
+        # (controls compiles inside dependency builds) and to cmake --build -j
+        # for our own targets. getconf is portable across Linux and macOS.
+        run: echo "n=$(($(getconf _NPROCESSORS_ONLN) * 2))" >> "$GITHUB_OUTPUT"
+        shell: bash
+
       - name: Install dependencies
         # On Linux, several Conan recipes (xorg, egl, opengl, ...) expect
         # apt-installed system packages. Switching the package manager
@@ -62,10 +70,12 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
             conan install . --build=missing \
+              -c tools.build:jobs=${{ steps.jobs.outputs.n }} \
               -c tools.system.package_manager:mode=install \
               -c tools.system.package_manager:sudo=True
           else
-            conan install . --build=missing
+            conan install . --build=missing \
+              -c tools.build:jobs=${{ steps.jobs.outputs.n }}
           fi
         shell: bash
 
@@ -73,11 +83,7 @@ jobs:
         run: cmake --preset conan-release
 
       - name: Build
-        # Cap parallelism to avoid OOM on the ubuntu-latest runner (7 GB
-        # RAM): axapp.cpp pulls in enough wxWidgets template-heavy
-        # headers that 4 of them in flight at once gets the runner
-        # OOM-killed.
-        run: cmake --build build/Release -j 2
+        run: cmake --build build/Release -j ${{ steps.jobs.outputs.n }}
 
       - name: Verify binary
         run: |
