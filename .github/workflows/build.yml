@@ -80,15 +80,20 @@ jobs:
         # apt-installed system packages. Switching the package manager
         # mode from `check` to `install` lets Conan run apt-get itself
         # so we don't have to keep our own list in sync with the recipes.
+        # Force Ninja everywhere so the same `conan-release` preset name
+        # works on all platforms (Conan defaults to the Visual Studio
+        # multi-config generator on Windows otherwise).
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
             conan install . --build=missing \
               -c tools.build:jobs=${{ steps.jobs.outputs.n }} \
+              -c tools.cmake.cmaketoolchain:generator=Ninja \
               -c tools.system.package_manager:mode=install \
               -c tools.system.package_manager:sudo=True
           else
             conan install . --build=missing \
-              -c tools.build:jobs=${{ steps.jobs.outputs.n }}
+              -c tools.build:jobs=${{ steps.jobs.outputs.n }} \
+              -c tools.cmake.cmaketoolchain:generator=Ninja
           fi
         shell: bash
 
@@ -102,11 +107,17 @@ jobs:
         # Just confirm the architecture/format. Don't try to run it: as
         # a wxWidgets GUI app it hangs on the headless runner waiting
         # for a display.
-        run: file build/Release/aruspix
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            ls -lh build/Release/aruspix.exe
+          else
+            file build/Release/aruspix
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
           name: aruspix-${{ runner.os }}-${{ runner.arch }}
-          path: build/Release/aruspix
+          path: build/Release/aruspix*
           if-no-files-found: error
           retention-days: 14
