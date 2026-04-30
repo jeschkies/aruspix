@@ -163,8 +163,14 @@ class ImConan(ConanFile):
             # We only ship static archives, so suppress Tecmake's dylib
             # link step (which would otherwise need libpng/fftw on the
             # link line — irrelevant for the .a output).
+            extra = "NO_DYNAMIC=Yes"
+            if self.settings.os == "Windows":
+                # tecmakewin.mak refuses to start without TEC_UNAME set;
+                # vc17_64 corresponds to MSVC 17.x (Visual Studio 2022),
+                # which is what GitHub Actions windows-latest ships.
+                extra += " TEC_UNAME=vc17_64"
             for target in ("im", "im_process", "im_fftw3"):
-                self.run(f"make {target} NO_DYNAMIC=Yes", cwd=src_dir)
+                self.run(f"make {target} {extra}", cwd=src_dir)
         finally:
             for k, v in saved.items():
                 if v is None:
