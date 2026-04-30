@@ -17,7 +17,7 @@
 #include "muslayer.h"
 #include "musapp.h"
 
-#include <uuid/uuid.h>
+#include "aruspix_uuid.h"
 
 // TINYXML
 #if defined (__WXMSW__)

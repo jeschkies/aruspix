@@ -14,7 +14,7 @@
     #include "wx/wx.h"
 #endif
 
-#include <uuid/uuid.h>
+#include "aruspix_uuid.h"
 #include <typeinfo>
 #include <vector>
 #include <list>

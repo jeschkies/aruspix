@@ -166,4 +166,8 @@ if(UNIX AND NOT APPLE)
     target_link_libraries(aruspix PRIVATE pthread uuid)
 elseif(APPLE)
     target_link_libraries(aruspix PRIVATE pthread)
+elseif(WIN32)
+    # rpcrt4 provides UuidCreate; the others are pulled in transitively
+    # by IM's prebuilt static libs but stating them explicitly is harmless.
+    target_link_libraries(aruspix PRIVATE rpcrt4)
 endif()
