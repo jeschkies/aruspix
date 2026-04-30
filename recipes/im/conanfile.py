@@ -11,7 +11,7 @@ import os
 import shutil
 
 from conan import ConanFile
-from conan.tools.files import download, copy, replace_in_file
+from conan.tools.files import download, copy, replace_in_file, unzip
 
 
 class ImConan(ConanFile):
@@ -25,16 +25,21 @@ class ImConan(ConanFile):
     package_type = "static-library"
 
     def requirements(self):
-        # IM links against an external libpng (its own libpng sources are
-        # only used on Windows), libtiff (bundled in upstream IM but
-        # patched out below so we don't collide with consumers like
-        # wxWidgets that bring their own libtiff), and FFTW for
-        # im_fftw3.
-        self.requires("libpng/[>=1.6 <2]", transitive_headers=True)
-        self.requires("libtiff/[>=4.0 <5]", transitive_headers=True)
-        self.requires("fftw/[>=3.3 <4]")
+        # On Linux/macOS we drive the upstream Tecmake build, which links
+        # against an external libpng, libtiff (we patch the bundled
+        # sources out below to avoid colliding with wxWidgets'
+        # transitively-pulled libtiff), and FFTW for im_fftw3.
+        # On Windows we use the official static-library zip from
+        # SourceForge, which already contains all required dependencies
+        # statically embedded — no extra Conan deps needed.
+        if self.settings.os != "Windows":
+            self.requires("libpng/[>=1.6 <2]", transitive_headers=True)
+            self.requires("libtiff/[>=4.0 <5]", transitive_headers=True)
+            self.requires("fftw/[>=3.3 <4]")
 
     def source(self):
+        # source() must be configuration-independent; the Windows
+        # prebuilt download is handled in build() instead.
         tarball = "im-3.15_Sources.tar.gz"
         url = (
             "https://sourceforge.net/projects/imtoolkit/files/"
@@ -146,6 +151,25 @@ class ImConan(ConanFile):
         return os.path.join(self.source_folder, "im")
 
     def build(self):
+        if self.settings.os == "Windows":
+            # Windows: pull the official upstream prebuilt static libs.
+            # vc16 (Visual Studio 2019) is ABI-compatible with vc17
+            # (Visual Studio 2022, what GitHub Actions windows-latest
+            # ships). Building IM from source on Windows would require
+            # driving its idiosyncratic tecmakewin.mak with a specific
+            # legacy VS install layout — not worth it.
+            zip_name = "im-3.15_Win64_vc16_lib.zip"
+            url = (
+                "https://sourceforge.net/projects/imtoolkit/files/"
+                "3.15/Windows%20Libraries/Static/"
+                + zip_name
+                + "/download"
+            )
+            download(self, url, zip_name)
+            unzip(self, zip_name, destination="prebuilt", strip_root=False)
+            os.remove(zip_name)
+            return
+
         self._apply_patches(self._im_root)
 
         png_dep = self.dependencies["libpng"]
@@ -179,6 +203,23 @@ class ImConan(ConanFile):
                     os.environ[k] = v
 
     def package(self):
+        if self.settings.os == "Windows":
+            prebuilt = os.path.join(self.build_folder, "prebuilt")
+            copy(
+                self,
+                "*.h",
+                src=os.path.join(prebuilt, "include"),
+                dst=os.path.join(self.package_folder, "include"),
+            )
+            copy(
+                self,
+                "*.lib",
+                src=os.path.join(prebuilt, "lib"),
+                dst=os.path.join(self.package_folder, "lib"),
+                keep_path=False,
+            )
+            return
+
         copy(
             self,
             "*.h",
@@ -215,3 +256,6 @@ class ImConan(ConanFile):
         self.cpp_info.libs = ["im_fftw3", "im_process", "im"]
         if self.settings.os in ("Linux", "FreeBSD"):
             self.cpp_info.system_libs = ["m", "pthread"]
+        elif self.settings.os == "Windows":
+            # The prebuilt static libs depend on these Win32 libraries.
+            self.cpp_info.system_libs = ["gdi32", "user32", "comctl32"]
