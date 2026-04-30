@@ -124,6 +124,10 @@ set(aruspixSources
     src/tinyxml/tinyxmlparser.cpp
 )
 
+if(WIN32)
+    list(APPEND aruspixSources src/aruspix_uuid_win.cpp)
+endif()
+
 add_executable(aruspix ${aruspixSources})
 
 target_include_directories(aruspix PRIVATE

@@ -4,16 +4,14 @@
 
 #include <cstdio>
 #include <cstring>
-#include <rpc.h>
 
+// libuuid-style typedef. We deliberately do *not* include <rpc.h> here:
+// rpcdce.h defines `typedef UUID uuid_t;` and that conflicts with the
+// array typedef Aruspix expects. The one operation that actually needs
+// rpc.h (uuid_generate, via UuidCreate) lives in src/aruspix_uuid_win.cpp.
 typedef unsigned char uuid_t[16];
 
-inline void uuid_generate(uuid_t out)
-{
-    UUID u;
-    UuidCreate(&u);
-    std::memcpy(out, &u, 16);
-}
+void uuid_generate(uuid_t out);
 
 inline void uuid_clear(uuid_t out)
 {
