@@ -171,7 +171,14 @@ if(UNIX AND NOT APPLE)
 elseif(APPLE)
     target_link_libraries(aruspix PRIVATE pthread)
 elseif(WIN32)
-    # rpcrt4 provides UuidCreate; the others are pulled in transitively
-    # by IM's prebuilt static libs but stating them explicitly is harmless.
+    # rpcrt4 provides UuidCreate.
     target_link_libraries(aruspix PRIVATE rpcrt4)
+    # IM's upstream prebuilt im.lib statically embeds libtiff (and
+    # libpng/libjpeg/zlib) — those symbols then collide with the
+    # tiff/png/jpeg/zlib that wxWidgets pulls in transitively from
+    # Conan. /FORCE:MULTIPLE lets the linker pick the first definition;
+    # /IGNORE:4006 silences the resulting warning. The duplicates are
+    # the same upstream code (libtiff 4.x etc.) so binding to either
+    # copy is safe.
+    target_link_options(aruspix PRIVATE /FORCE:MULTIPLE /IGNORE:4006 /IGNORE:4088)
 endif()
