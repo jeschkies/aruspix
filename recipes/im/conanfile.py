@@ -29,13 +29,13 @@ class ImConan(ConanFile):
         # against an external libpng, libtiff (we patch the bundled
         # sources out below to avoid colliding with wxWidgets'
         # transitively-pulled libtiff), and FFTW for im_fftw3.
-        # On Windows we use the official static-library zip from
-        # SourceForge, which already contains all required dependencies
-        # statically embedded — no extra Conan deps needed.
+        # The Windows prebuilt zip embeds libpng/libtiff/libjpeg/zlib
+        # statically inside im.lib, but its im_fftw3.lib is a thin
+        # wrapper that still expects an external FFTW.
         if self.settings.os != "Windows":
             self.requires("libpng/[>=1.6 <2]", transitive_headers=True)
             self.requires("libtiff/[>=4.0 <5]", transitive_headers=True)
-            self.requires("fftw/[>=3.3 <4]")
+        self.requires("fftw/[>=3.3 <4]")
 
     def source(self):
         # source() must be configuration-independent; the Windows

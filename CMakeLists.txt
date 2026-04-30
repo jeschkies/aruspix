@@ -130,6 +130,11 @@ endif()
 
 add_executable(aruspix ${aruspixSources})
 
+# wxWidgets' wxIMPLEMENT_APP macro emits WinMain, not main, so the
+# executable needs the GUI subsystem on Windows. WIN32_EXECUTABLE also
+# wires up the right entry-point shim in the C runtime.
+set_target_properties(aruspix PROPERTIES WIN32_EXECUTABLE TRUE)
+
 target_include_directories(aruspix PRIVATE
     src
     src/app

@@ -1,25 +1,20 @@
 // Windows-only out-of-line implementation of uuid_generate.
 //
-// Lives in its own translation unit because <rpc.h> defines a struct
-// `uuid_t` that collides with the libuuid-style array typedef in
-// aruspix_uuid.h. By not including aruspix_uuid.h here, we avoid the
-// conflict; the function signature just takes a raw `unsigned char *`
-// (which is what aruspix_uuid.h's `uuid_t` decays to as a parameter).
+// We can include aruspix_uuid.h here because it defines our libuuid-style
+// type as `ax_uuid_t` rather than `uuid_t`, so it does not clash with
+// <rpc.h>'s own UUID/uuid_t. The signature must match what other
+// translation units see in the header, otherwise MSVC's name mangling
+// drifts (ax_uuid_t parameter decays to `unsigned char *const`, not
+// the `unsigned char *` the linker would otherwise look for).
 
 #if defined(_WIN32)
+
+#include "aruspix_uuid.h"
 
 #include <cstring>
 #include <rpc.h>
 
-// Function name and signature must match the declaration in
-// aruspix_uuid.h (`void uuid_generate(ax_uuid_t out)` where ax_uuid_t
-// is unsigned char[16]). The array decays to `unsigned char *`, which
-// is what we accept here. We deliberately do not include
-// aruspix_uuid.h to avoid pulling in the typedef alongside <rpc.h>'s
-// own uuid_t.
-extern void uuid_generate(unsigned char *out);
-
-void uuid_generate(unsigned char *out)
+void uuid_generate(ax_uuid_t out)
 {
     UUID u;
     ::UuidCreate(&u);
