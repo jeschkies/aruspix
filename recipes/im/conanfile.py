@@ -211,10 +211,12 @@ class ImConan(ConanFile):
                 src=os.path.join(prebuilt, "include"),
                 dst=os.path.join(self.package_folder, "include"),
             )
+            # The upstream zip puts the .lib files at its root, not in a
+            # lib/ subdirectory.
             copy(
                 self,
                 "*.lib",
-                src=os.path.join(prebuilt, "lib"),
+                src=prebuilt,
                 dst=os.path.join(self.package_folder, "lib"),
                 keep_path=False,
             )
