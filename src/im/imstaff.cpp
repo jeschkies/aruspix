@@ -42,14 +42,9 @@ enum
 	VALUES_LINE_M
 };
 
-// probleme de link avec im_lib ???
-#ifdef __WXMSW__
-	extern "C" 
-	{
-		int __mb_cur_max;
-		unsigned short* _pctype;
-	}
-#endif
+// (Old workaround for an MSVC/im_lib link issue; modern MSVC declares
+// __mb_cur_max and _pctype as functions, so the manual extern "C"
+// forward declarations no longer compile and are unnecessary.)
 
 
 //imImage* imdebug = NULL;
