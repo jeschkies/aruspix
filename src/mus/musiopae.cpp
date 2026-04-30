@@ -82,7 +82,7 @@ bool MusPaeInput::ImportFile()
 {
     
     std::ifstream infile;
-    infile.open(m_filename);
+    infile.open(static_cast<const char*>(m_filename.mb_str()));
     
     convertPlainAndEasyToKern(infile, std::cout);
     
