@@ -46,9 +46,11 @@ class ImConan(ConanFile):
             "3.15/Docs%20and%20Sources/im-3.15_Sources.tar.gz/download"
         )
         download(self, url, tarball)
-        # IM's tarball contains a few self-referential hardlinks under dox/
-        # that bsdtar warns about; ignore the non-zero exit.
-        self.run(f"tar xzf {tarball} || true")
+        # Use conan's unzip (Python tarfile) instead of shelling out to
+        # `tar`: PowerShell on Windows doesn't understand `|| true`, and
+        # tarfile tolerates the self-referential hardlinks under dox/ that
+        # bsdtar warns about.
+        unzip(self, tarball, strip_root=False)
         os.remove(tarball)
 
     def _apply_patches(self, im_root):
