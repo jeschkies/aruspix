@@ -37,6 +37,21 @@ jobs:
       - name: Install Conan
         run: pip install --upgrade "conan>=2.0,<3"
 
+      # Cache Conan downloads + binary packages. Key on the recipe files
+      # so a change to the IM recipe or project requirements triggers a
+      # rebuild; everyday source edits reuse cached binaries.
+      #
+      # Restore the cache BEFORE running `conan profile detect` and
+      # writing global.conf, so the restore can't clobber a fresh profile
+      # that matches this runner or the download-urls setting below.
+      - name: Cache Conan packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.conan2
+          key: conan-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('conanfile.py', 'recipes/**/conanfile.py') }}
+          restore-keys: |
+            conan-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Detect Conan profile
         run: conan profile detect --force
 
@@ -48,22 +63,15 @@ jobs:
       #
       # core.* config has to live in global.conf; it can't be passed as
       # `-c core.sources:...` on the command line (Conan rejects it).
+      # Idempotent append (grep -qxF) so re-runs on a warm cache don't
+      # accumulate duplicate lines.
       - name: Configure Conan backup sources
         shell: bash
         run: |
           mkdir -p ~/.conan2
-          echo 'core.sources:download_urls=["https://c3i.jfrog.io/artifactory/conan-center-backup-sources/", "origin"]' >> ~/.conan2/global.conf
-
-      # Cache Conan downloads + binary packages. Key on the recipe files
-      # so a change to the IM recipe or project requirements triggers a
-      # rebuild; everyday source edits reuse cached binaries.
-      - name: Cache Conan packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.conan2
-          key: conan-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('conanfile.py', 'recipes/**/conanfile.py') }}
-          restore-keys: |
-            conan-${{ runner.os }}-${{ runner.arch }}-
+          LINE='core.sources:download_urls=["https://c3i.jfrog.io/artifactory/conan-center-backup-sources/", "origin"]'
+          touch ~/.conan2/global.conf
+          grep -qxF "$LINE" ~/.conan2/global.conf || echo "$LINE" >> ~/.conan2/global.conf
 
       - name: Export local IM recipe
         run: conan export recipes/im
