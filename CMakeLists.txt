@@ -241,3 +241,27 @@ if(WIN32)
 endif()
 
 add_test(NAME aruspix_tests COMMAND aruspix_tests)
+
+# ---------------------------------------------------------------------------
+# Tools
+#
+# dump_binarize: one-shot fixture generator. Runs ax::binarize_and_clean
+# on a JPG and writes a PNG + FNV-1a-64 hash. A near-twin on master
+# runs the IM-based algorithm and produces the same-format output so
+# we can compare byte-for-byte between the two branches.
+# ---------------------------------------------------------------------------
+add_executable(dump_binarize
+    tools/dump_binarize.cpp
+    src/im/binarize.cpp
+    src/im/imext.cpp
+    src/im/imbrink.cpp
+    src/im/imbrink3classes.cpp
+)
+target_include_directories(dump_binarize PRIVATE src)
+target_link_libraries(dump_binarize PRIVATE
+    im::im
+    opencv::opencv
+)
+if(WIN32)
+    target_link_options(dump_binarize PRIVATE /FORCE:MULTIPLE /IGNORE:4006 /IGNORE:4088)
+endif()
