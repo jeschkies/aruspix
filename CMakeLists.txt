@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.21)
 project(aruspix CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -186,4 +186,15 @@ elseif(WIN32)
     # the same upstream code (libtiff 4.x etc.) so binding to either
     # copy is safe.
     target_link_options(aruspix PRIVATE /FORCE:MULTIPLE /IGNORE:4006 /IGNORE:4088)
+
+    # fftw is built as a DLL on Windows (see conanfile.py) so IM's
+    # im_fftw3.lib imports resolve. Copy every runtime DLL the aruspix
+    # target depends on (fftw3f.dll, and anything else Conan exposes as
+    # SHARED) into the output directory so the exe can find them at
+    # launch without needing PATH tweaks.
+    add_custom_command(TARGET aruspix POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:aruspix> $<TARGET_FILE_DIR:aruspix>
+        COMMAND_EXPAND_LISTS
+    )
 endif()
