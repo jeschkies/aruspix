@@ -97,11 +97,27 @@ jobs:
           fi
         shell: bash
 
+      # On Windows, source Conan's generated conanbuild.bat before cmake.
+      # It applies vcvars for the arch Conan actually built the deps with,
+      # so an ambient x86 shell can't quietly downgrade the aruspix target
+      # to Win32 and produce an x86/x64 link mismatch.
       - name: Configure
-        run: cmake --preset conan-release
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cmd //c "build\\Release\\generators\\conanbuild.bat && cmake --preset conan-release"
+          else
+            cmake --preset conan-release
+          fi
 
       - name: Build
-        run: cmake --build build/Release -j ${{ steps.jobs.outputs.n }}
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cmd //c "build\\Release\\generators\\conanbuild.bat && cmake --build build/Release -j ${{ steps.jobs.outputs.n }}"
+          else
+            cmake --build build/Release -j ${{ steps.jobs.outputs.n }}
+          fi
 
       - name: Inspect binary
         # Just confirm the architecture/format. Don't try to run it: as
