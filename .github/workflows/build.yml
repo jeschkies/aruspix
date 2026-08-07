@@ -40,6 +40,20 @@ jobs:
       - name: Detect Conan profile
         run: conan profile detect --force
 
+      # core.sources:download_urls falls back to Conan Center's backup
+      # source mirror when a recipe's origin URL is unreachable. Matters
+      # for chronically flaky upstreams like tukaani.org (xz). The
+      # "origin" sentinel means "the URL declared in the recipe" — we
+      # try the mirror first, then origin as a final fallback.
+      #
+      # core.* config has to live in global.conf; it can't be passed as
+      # `-c core.sources:...` on the command line (Conan rejects it).
+      - name: Configure Conan backup sources
+        shell: bash
+        run: |
+          mkdir -p ~/.conan2
+          echo 'core.sources:download_urls=["https://c3i.jfrog.io/artifactory/conan-center-backup-sources/", "origin"]' >> ~/.conan2/global.conf
+
       # Cache Conan downloads + binary packages. Key on the recipe files
       # so a change to the IM recipe or project requirements triggers a
       # rebuild; everyday source edits reuse cached binaries.
@@ -83,27 +97,17 @@ jobs:
         # Force Ninja everywhere so the same `conan-release` preset name
         # works on all platforms (Conan defaults to the Visual Studio
         # multi-config generator on Windows otherwise).
-        #
-        # core.sources:download_urls falls back to Conan Center's backup
-        # source mirror when the recipe's origin URL is unreachable. This
-        # matters for chronically flaky upstreams like tukaani.org (xz),
-        # which have timed out builds in the past. "origin" is a sentinel
-        # meaning "the URL declared in the recipe" — we try the mirror
-        # first, then the origin as a final fallback.
         run: |
-          BACKUP_SOURCES='["https://c3i.jfrog.io/artifactory/conan-center-backup-sources/", "origin"]'
           if [ "$RUNNER_OS" = "Linux" ]; then
             conan install . --build=missing \
               -c tools.build:jobs=${{ steps.jobs.outputs.n }} \
               -c tools.cmake.cmaketoolchain:generator=Ninja \
               -c tools.system.package_manager:mode=install \
-              -c tools.system.package_manager:sudo=True \
-              -c "core.sources:download_urls=$BACKUP_SOURCES"
+              -c tools.system.package_manager:sudo=True
           else
             conan install . --build=missing \
               -c tools.build:jobs=${{ steps.jobs.outputs.n }} \
-              -c tools.cmake.cmaketoolchain:generator=Ninja \
-              -c "core.sources:download_urls=$BACKUP_SOURCES"
+              -c tools.cmake.cmaketoolchain:generator=Ninja
           fi
         shell: bash
 
