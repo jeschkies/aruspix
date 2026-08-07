@@ -19,6 +19,7 @@ using std::max;
 #include "imkmeans.h"
 #include "thresholds.h"
 #include "analyze.h"
+#include "image_ops.h"
 
 #include <im.h>
 #include <im_image.h>
@@ -111,93 +112,87 @@ static int DoConvolveRankFunc(T *map, DT* new_map, int width, int height, int kw
 }
 
 
+namespace ax {
+
+void set_data(cv::Mat& image, const cv::Mat& selection,
+              int pos_x, int pos_y)
+{
+	if (image.empty() || selection.empty()) return;
+	if (image.type() != selection.type()) return;
+
+	int w = selection.cols;
+	int h = selection.rows;
+	int sel_pos_x = 0;
+	int sel_pos_y = 0;
+
+	if ((pos_x > image.cols) || (pos_y > image.rows)) return;
+
+	if (pos_x < 0) { w += pos_x; sel_pos_x = -pos_x; pos_x = 0; }
+	if (pos_y < 0) { h += pos_y; sel_pos_y = -pos_y; pos_y = 0; }
+
+	if (pos_x + w > image.cols) w = image.cols - pos_x;
+	if (pos_y + h > image.rows) h = image.rows - pos_y;
+
+	if ((w <= 0) || (h <= 0)) return;
+
+	cv::Rect dst_rect(pos_x, pos_y, w, h);
+	cv::Rect src_rect(sel_pos_x, sel_pos_y, w, h);
+	selection(src_rect).copyTo(image(dst_rect));
+}
+
+bool safe_crop(const cv::Mat& image, int *width, int *height,
+               int *pos_x, int *pos_y)
+{
+	int x = *pos_x;
+	int y = *pos_y;
+	int w = *width;
+	int h = *height;
+
+	if ((x > image.cols) || (y > image.rows)) return false;
+
+	if (x < 0) { w += x; x = 0; }
+	if (y < 0) { h += y; y = 0; }
+
+	if (x + w > image.cols) w = image.cols - x;
+	if (y + h > image.rows) h = image.rows - y;
+
+	if ((w <= 0) || (h <= 0)) return false;
+
+	*pos_x = x;
+	*pos_y = y;
+	*width = w;
+	*height = h;
+	return true;
+}
+
+}  // namespace ax
+
+// Delegate to ax::set_data. imImage carries a depth (per-plane count)
+// which cv::Mat expresses via channels; we iterate planes here for
+// the (rare) multi-plane case, wrapping each in an 8-bit view because
+// imSetData never inspected the element type beyond byte width.
 void imSetData( _imImage *image, _imImage *selection, int pos_x, int pos_y )
 {
-    int w = selection->width;
-    int h = selection->height;
-    int sel_pos_x = 0;
-    int sel_pos_y = 0;
-    
-	if ((pos_x > image->width) || (pos_y > image->height)) // we cannot copy outside the image
-		return;
-        
-    // first adjust the origine
-    if (pos_x < 0) { // move the origine and reduce the width
-        w += pos_x;
-        sel_pos_x = -pos_x;
-        pos_x = 0;
-    }    
-    if (pos_y < 0) { // idem
-        h += pos_y;
-        sel_pos_y = -pos_y;
-        pos_y = 0;
-    }
-    
-    // then adjust the with/height     
-	if (pos_x + w > image->width) {
-        w = image->width - pos_x;
-    } 
-    if (pos_y + h > image->height) {
-		h = image->height - pos_y;
-    }
-    
-	if ((w <= 0) || (h <= 0)) // we cannot copy nothing or less...
-		return;
-
+	if (image->depth != selection->depth) return;
 	int type_size = imDataTypeSize(image->data_type);
-	for (int i = 0; i < image->depth; i++)
-	{
-		imbyte *im_map = (imbyte*)image->data[i];
-		imbyte *sel_map = (imbyte*)selection->data[i];
-
-		for	(int y = 0; y < h ; y++)
-		{
-			int im_offset = (y + pos_y) * image->line_size + pos_x * type_size;
-			int sel_offset = (y + sel_pos_y) * selection->line_size + sel_pos_x * type_size;
-
-			memcpy(&im_map[im_offset], &sel_map[sel_offset], w * type_size);
-		}
+	int row_stride_bytes = image->width * type_size;
+	// Wrap each plane as an 8-bit Mat sized (height, width * type_size)
+	// so ax::set_data's copyTo works byte-for-byte, matching imSetData's
+	// original memcpy loop irrespective of the imImage element type.
+	for (int i = 0; i < image->depth; ++i) {
+		cv::Mat img_plane(image->height, image->width * type_size, CV_8UC1,
+		                  image->data[i]);
+		cv::Mat sel_plane(selection->height, selection->width * type_size,
+		                  CV_8UC1, selection->data[i]);
+		ax::set_data(img_plane, sel_plane, pos_x * type_size, pos_y);
 	}
 }
 
-
 bool imProcessSafeCrop( _imImage *image, int *width, int *height, int *pos_x, int *pos_y )
 {
-    int x = *pos_x;
-    int y = *pos_y;
-    int w = *width;
-    int h = *height;
-
-	if ((x > image->width) || (y > image->height)) // we cannot crop outside the image
-		return false;
-     
-    // first adjust the origine
-    if (x < 0) { // move the origine and reduce the width
-        w += x;
-        x = 0;
-    }    
-    if (y < 0) { // idem
-        h += y;
-        y = 0;
-    }
-    
-    // then adjust the with/height     
-	if (x + w > image->width) {
-        w = image->width - x;
-    } 
-    if (y + h > image->height) {
-		h = image->height - y;
-    }
-    
-	if ((w <= 0) || (h <= 0)) // we cannot nothing or less...
-		return false;
-        
-    // create the image
-    *pos_x = x;
-    *pos_y = y;
-    *width = w;
-    *height = h;
-    return true;
+	cv::Mat src(image->height, image->width, CV_8UC1,
+	            const_cast<void*>(image->data[0]));
+	return ax::safe_crop(src, width, height, pos_x, pos_y);
 }
 
 
