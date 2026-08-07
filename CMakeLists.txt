@@ -47,7 +47,6 @@ set(aruspixSources
     src/im/imbrink3classes.cpp
     src/im/imbrink.cpp
     src/im/imext.cpp
-    src/im/imkmeans.cpp
     src/im/imoperator.cpp
     src/im/impage.cpp
     src/im/imregister.cpp
@@ -207,8 +206,8 @@ endif()
 # Tests
 #
 # A separate target that exercises the wx-free leaf functions in src/im/
-# (imext.cpp, imbrink.cpp, imbrink3classes.cpp, imkmeans.cpp). These pin
-# down current IM behavior so we can swap IM for OpenCV without regressions.
+# (imext.cpp, imbrink.cpp, imbrink3classes.cpp). These pin down current
+# IM behavior so we can swap IM for OpenCV without regressions.
 # The wx-coupled wrapper classes (ImPage, ImStaff, ImRegister, ImOperator)
 # are intentionally not covered here — they need real-image fixtures and
 # belong in an integration-test target.
@@ -220,13 +219,11 @@ add_executable(aruspix_tests
     src/im/imext.cpp
     src/im/imbrink.cpp
     src/im/imbrink3classes.cpp
-    src/im/imkmeans.cpp
 
     tests/test_main.cpp
     tests/test_imext_helpers.cpp
     tests/test_imext_image.cpp
     tests/test_imext_threshold.cpp
-    tests/test_imkmeans.cpp
     tests/test_binarize.cpp
 )
 

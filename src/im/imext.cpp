@@ -16,7 +16,6 @@ using std::min;
 using std::max;
 
 #include "imext.h"
-#include "imkmeans.h"
 #include "thresholds.h"
 #include "analyze.h"
 #include "image_ops.h"
@@ -1002,58 +1001,6 @@ int imProcessSauvolaThreshold( const imImage* image, imImage* dest, int region_s
 	                             dynamic_range, lower_bound, upper_bound,
 	                             white_is_255);
 }
-
-int imProcessPuginThreshold(const imImage* image, imImage* dest, bool white_is_255 )
-{
-	int i;
-	imImage *src = imImageDuplicate( image );
-     
-	if ( !white_is_255 )
-		imProcessNegative( src, src );
-
-	imImage *otsu_dest = imImageDuplicate( image );
-	int otsu = imProcessOtsuThreshold( src, otsu_dest );
-	int background = 255 - ((255 - otsu) / 2);
-	
-	int counter = imCounterBegin("Pugin threshold");
-	imCounterTotal(counter, 2*src->size, "Pugin threshold");	
-
-	imbyte* src_data = (imbyte*)src->data[0];
-	int ret = 1;
-	for( i = 0; i < src->size; i++ )
-	{
-		if ( !ret ) // aborted or error
-			break;
-	
-		if ((*src_data) > background)
-			(*src_data) = background;
-		src_data++;
-		ret = imCounterInc(counter);
-	}
-	imProcessExpandHistogram( src, src, 0.0 );
-	
-	//imbyte* mask = (imbyte*)malloc( src->size * sizeof( imbyte ) );
-	//memset( mask, 0, src->size * sizeof( imbyte ) );
-	src_data = (imbyte*)src->data[0];
-	imbyte* dest_data = (imbyte*)dest->data[0];
-	//double *means = kmeans( src_data, src->size, dest_data, 3);
-	for( i = 0; i < dest->size; i++ )
-	{
-		if ( !ret ) // aborted or error
-			break;
-			
-		if ((*dest_data) > 1)
-			(*dest_data) = 1; // white, 1 in the destination image
-		else
-			(*dest_data) = 0; // black, 0 in the destination image
-		dest_data++;
-		ret = imCounterInc(counter);
-	}
-	imCounterEnd( counter );
-	
-	return ret;
-}
-
 
 namespace ax {
 

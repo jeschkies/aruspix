@@ -165,39 +165,6 @@ TEST_CASE("imProcessSauvolaThreshold: invalid region_size returns 0") {
 }
 
 // ---------------------------------------------------------------------------
-// Pugin threshold (built on top of Otsu + histogram expansion)
-// ---------------------------------------------------------------------------
-
-TEST_CASE("imProcessPuginThreshold: pins the current (broken-looking) behavior") {
-    // WARNING: imProcessPuginThreshold in this codebase appears to be
-    // half-implemented. The kmeans call that was supposed to populate
-    // the destination is commented out (see imext.cpp ~line 960), and
-    // the final loop only reads from `dest` (which the caller created
-    // with imImageCreate, so it starts zero-filled). The result is
-    // therefore *always all zeros*, regardless of the input image.
-    //
-    // We pin this so the OpenCV port isn't held to a wrong reference.
-    // Anyone porting Pugin should first dig the original kmeans-based
-    // implementation out of git history and decide what it should do.
-    imImage *src = make_bimodal(/*dark=*/30, /*bright=*/220);
-    imImage *dst = imImageCreate(src->width, src->height, IM_BINARY, IM_BYTE);
-
-    int ok = imProcessPuginThreshold(src, dst, /*white_is_255=*/true);
-    CHECK(ok != 0);
-
-    auto *p = static_cast<unsigned char *>(dst->data[0]);
-    int ones = 0;
-    for (int i = 0; i < dst->count; ++i) {
-        CHECK((p[i] == 0 || p[i] == 1));
-        if (p[i]) ones++;
-    }
-    CHECK(ones == 0);  // Pin the broken behavior — every pixel is 0.
-
-    imImageDestroy(src);
-    imImageDestroy(dst);
-}
-
-// ---------------------------------------------------------------------------
 // Kittler entropy threshold
 // ---------------------------------------------------------------------------
 

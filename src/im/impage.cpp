@@ -550,17 +550,6 @@ bool ImPage::Check( wxString infile, int max_size, int min_size, int index )
     //wxString im_histo = m_path + "im_histo.csv";
 	//imSaveValues( (int*)histo, 256, im_histo.c_str() );
 	
-	///// TEST
-    //m_opImTmp1 = imImageCreate( m_opImMain->width, m_opImMain->height, IM_BINARY, IM_BYTE );
-    //if ( !m_opImTmp1 )
-    //    return this->Terminate( ERR_MEMORY );
-	//if ( !m_progressDlg->SetOperation( _("Binarization ...") ) )
-	//	return this->Terminate( ERR_CANCELED );
-	//wxLogMessage("Pugin binarization");
-	//imProcessPuginThreshold( m_opImMain, m_opImTmp1, false );
-	//SwapImages( &m_opImMain, &m_opImTmp1 );
-	//////
-    
     //ImageDestroy( &m_img0 );
 	/*m_img0 = imImageClone( m_opImMain );
 	imPhotogrammetric( m_opImMain, m_img0 );

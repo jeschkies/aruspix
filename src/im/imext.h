@@ -58,8 +58,6 @@ int imProcessKittlerThreshold(const _imImage* image, _imImage* NewImage);
 
 int imProcessSauvolaThreshold( const _imImage* src, _imImage* dest,	int region_size,
 	float sensitivity = 0.5, int dynamic_range = 128, int lower_bound = 20, int upper_bound = 150, bool white_is_255 = true );
-	
-int imProcessPuginThreshold( const _imImage* src, _imImage* dest, bool white_is_255 = true );
 
 // implementation in im_brink.cpp
 int imProcessBrinkThreshold( const _imImage* src, _imImage* dest, bool white_is_255 = true );
