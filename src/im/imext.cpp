@@ -18,6 +18,7 @@ using std::max;
 #include "imext.h"
 #include "imkmeans.h"
 #include "thresholds.h"
+#include "analyze.h"
 
 #include <im.h>
 #include <im_image.h>
@@ -389,25 +390,33 @@ void free2DArray( double **array, int x )
 	peak_val est la longueur du run le plus represente dans l'image
 	median_val est la longueur median de tous les runs
  */
-void imAnalyzeRuns(const imImage* image, int *peak_val, int *median_val, int type, bool vertical)
+namespace ax {
+
+void analyze_runs(const cv::Mat& src, int& peak_val, int& median_val,
+                  int type, bool vertical)
 {
-    imbyte *bufIm = (imbyte*)image->data[0];
+	if (src.type() != CV_8UC1) {
+		peak_val = 0;
+		median_val = 0;
+		return;
+	}
+	const imbyte *bufIm = src.data;
 	int h, w;
 	if ( vertical )
 	{
-		h = image->height;
-		w = image->width;
+		h = src.rows;
+		w = src.cols;
 	}
 	else
 	{
-		w = image->height;
-		h = image->width;		
+		w = src.rows;
+		h = src.cols;
 	}
-	
+
 	// runs
 	int* runs = (int*)malloc( h * w * sizeof(int) );
 	memset(runs, 0, h * w * sizeof(int) );
-	
+
 	// tableau compter les runs de chaque longueur (pour touver peak)
 	int* vals = (int*)malloc( h * sizeof(int) );
 	memset(vals, 0, h * sizeof(int) );
@@ -422,13 +431,13 @@ void imAnalyzeRuns(const imImage* image, int *peak_val, int *median_val, int typ
         run_val = 0;
         for (y = 0; y < h; y++)
         {
-            int offset; 
-			
+            int offset;
+
 			if (vertical)
 				offset = y * w + x;
 			else
 				offset = x * h + y;
-				
+
             if ( bufIm[ offset ] == run_type )
                 run_val++;
             else // changement
@@ -447,38 +456,67 @@ void imAnalyzeRuns(const imImage* image, int *peak_val, int *median_val, int typ
 
 	if ( i > 0 )
 	{
-		max_val( vals, h, peak_val );
-		(*median_val) = median( runs, i, false );
+		max_val( vals, h, &peak_val );
+		median_val = median( runs, i, false );
 	}
 	else
 	{
-		*peak_val = 0;
-		*median_val = 0;
+		peak_val = 0;
+		median_val = 0;
 	}
-	
+
 	free( runs );
 	free( vals );
+}
 
+}  // namespace ax
+
+void imAnalyzeRuns(const imImage* image, int *peak_val, int *median_val, int type, bool vertical)
+{
+	cv::Mat src(image->height, image->width, CV_8UC1,
+	            const_cast<void*>(image->data[0]));
+	ax::analyze_runs(src, *peak_val, *median_val, type, vertical);
 }
 
 /*
 	Calcule la projection horizontale d'une image
 	hist doit avoir la taille de la hauteur de l'image
  */
+namespace ax {
+
+void projection_h(const cv::Mat& src, std::vector<int>& hist)
+{
+	hist.assign(src.rows, 0);
+	if (src.type() != CV_8UC1) return;
+	for (int y = 0; y < src.rows; ++y) {
+		const imbyte *row = src.ptr<imbyte>(y);
+		int hist_val = 0;
+		for (int x = 0; x < src.cols; ++x)
+			hist_val += row[x];
+		hist[y] = hist_val;
+	}
+}
+
+void projection_v(const cv::Mat& src, std::vector<int>& hist)
+{
+	hist.assign(src.cols, 0);
+	if (src.type() != CV_8UC1) return;
+	for (int y = 0; y < src.rows; ++y) {
+		const imbyte *row = src.ptr<imbyte>(y);
+		for (int x = 0; x < src.cols; ++x)
+			hist[x] += row[x];
+	}
+}
+
+}  // namespace ax
+
 void imAnalyzeProjectionH(const imImage* image, int* hist)
 {
-	imbyte* img_data = (imbyte*)image->data[0];
-
-	for (int y = 0; y < image->height; y++)
-    {
-		int hist_val = 0;
- 		for (int x = 0; x < image->width; x++)
-		{
-			int offset = y * image->width + x;
-			hist_val += img_data[ offset ];
-		}
-		hist[y] = hist_val;
-    }
+	cv::Mat src(image->height, image->width, CV_8UC1,
+	            const_cast<void*>(image->data[0]));
+	std::vector<int> tmp;
+	ax::projection_h(src, tmp);
+	std::copy(tmp.begin(), tmp.end(), hist);
 }
 
 /*
@@ -487,19 +525,11 @@ void imAnalyzeProjectionH(const imImage* image, int* hist)
  */
 void imAnalyzeProjectionV(const imImage* image, int* hist)
 {
-	imbyte* img_data = (imbyte*)image->data[0];
-
-	for (int x = 0; x < image->width; x++)
-	{
-		int hist_val = 0;
- 		for (int y = 0; y < image->height; y++)
-		{
-			int offset = y * image->width + x;
-			hist_val += img_data[ offset ];
-
-		}
-		hist[x] = hist_val;
-	}
+	cv::Mat src(image->height, image->width, CV_8UC1,
+	            const_cast<void*>(image->data[0]));
+	std::vector<int> tmp;
+	ax::projection_v(src, tmp);
+	std::copy(tmp.begin(), tmp.end(), hist);
 }
 
 
