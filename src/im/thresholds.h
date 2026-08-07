@@ -29,6 +29,12 @@ int sauvola_threshold(const cv::Mat& src, cv::Mat& dst, int region_size,
                       int lower_bound = 20, int upper_bound = 150,
                       bool white_is_255 = true);
 
+// Kittler-Illingworth minimum-error threshold. Picks the T that
+// minimizes the log-likelihood criterion assuming two Gaussian modes.
+// `src` 8-bit single-channel; `dst` 8-bit single-channel, values 0/1.
+// Returns the chosen T.
+int kittler_threshold(const cv::Mat& src, cv::Mat& dst);
+
 // Brink cross-entropy threshold. Picks a single threshold value T that
 // minimizes the cross-entropy between the foreground and background
 // distributions of `src`. `src` 8-bit single-channel; `dst` 8-bit

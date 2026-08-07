@@ -647,7 +647,7 @@ void imAnalyzeBoundingBoxes(const imImage* image, int* boxes, int region_count )
 	}
 }
 
-static unsigned char Kittler(const imImage* src_image, double *mu_1, double *mu_2, double *mu)
+static unsigned char Kittler(const cv::Mat& src, double *mu_1, double *mu_2, double *mu)
 {
   unsigned long h[256];
   int threshold;
@@ -663,7 +663,6 @@ static unsigned char Kittler(const imImage* src_image, double *mu_1, double *mu_
   double J_T;
 
   {
-    cv::Mat src = as_mat(src_image);
     int histSize = 256;
     float range[] = {0.0f, 256.0f};
     const float *histRange = range;
@@ -1017,17 +1016,27 @@ int imProcessPuginThreshold(const imImage* image, imImage* dest, bool white_is_2
 }
 
 
-int imProcessKittlerThreshold(const imImage* image, imImage* NewImage )
+namespace ax {
+
+int kittler_threshold(const cv::Mat& src, cv::Mat& dst)
 {
+  if (src.type() != CV_8UC1) return 0;
   double dummy_1, dummy_2, dummy_3;
-  int level = Kittler(image , &dummy_1, &dummy_2, &dummy_3);
-  cv::Mat src = as_mat(image);
-  cv::Mat dst = as_mat(NewImage);
+  int level = ::Kittler(src, &dummy_1, &dummy_2, &dummy_3);
+  dst.create(src.rows, src.cols, CV_8UC1);
   // imProcessThreshold semantics: dst = (src <= level) ? 0 : 1.
   // cv::threshold with THRESH_BINARY: dst = (src > thresh) ? maxval : 0.
   // Same behavior with thresh=level, maxval=1.
   cv::threshold(src, dst, level, 1, cv::THRESH_BINARY);
   return level;
+}
+
+}  // namespace ax
+
+int imProcessKittlerThreshold(const imImage* image, imImage* NewImage )
+{
+  cv::Mat dst = as_mat(NewImage);
+  return ax::kittler_threshold(as_mat(image), dst);
 }
 
 void imPhotogrammetric( const imImage* image, imImage* dest ){
