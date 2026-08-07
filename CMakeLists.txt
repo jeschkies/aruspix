@@ -225,9 +225,16 @@ add_executable(aruspix_tests
     tests/test_imext_image.cpp
     tests/test_imext_threshold.cpp
     tests/test_binarize.cpp
+    tests/test_binarize_goldens.cpp
 )
 
 target_include_directories(aruspix_tests PRIVATE src/im)
+
+# Point the goldens test at the fixtures directory regardless of the
+# working directory ctest ends up in.
+target_compile_definitions(aruspix_tests PRIVATE
+    AX_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures"
+)
 
 target_link_libraries(aruspix_tests PRIVATE
     im::im
