@@ -46,8 +46,6 @@ void imAnalyzeProjectionH(const _imImage* image, int* hist);
 
 void imAnalyzeProjectionV(const _imImage* image, int* hist);
 
-void imAnalyzeMeasureMeanHeight(const _imImage* image, int* data_area, int region_count );
-
 void imAnalyzeClearHeight(const _imImage* image, int region_count, int min_threshold, int max_threshold );
 
 void imAnalyzeBoundingBoxes(const _imImage* image, int* boxes, int region_count );

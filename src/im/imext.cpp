@@ -534,35 +534,37 @@ void imAnalyzeProjectionV(const imImage* image, int* hist)
 	*image est une image labelisee (bg = 0, puis 1,2 ...)
 	region_count est le nombre de regions
  */
+namespace ax {
+
+void clear_height(cv::Mat& src, int region_count,
+                  int min_threshold, int max_threshold)
+{
+	if (src.type() != CV_16UC1 || region_count <= 0) return;
+
+	std::vector<int> heights(src.cols * region_count, 0);
+	const int count = src.rows * src.cols;
+	imushort *img_data = src.ptr<imushort>();
+	for (int i = 0; i < count; ++i) {
+		if (img_data[i])
+			heights[ (img_data[i] - 1) * src.cols + i % src.cols ]++;
+	}
+	for (int i = 0; i < count; ++i) {
+		if (img_data[i]) {
+			int h = heights[ (img_data[i] - 1) * src.cols + i % src.cols ];
+			if (h < min_threshold)
+				img_data[i] = 0;
+			else if (max_threshold && h > max_threshold)
+				img_data[i] = 0;
+		}
+	}
+}
+
+}  // namespace ax
+
 void imAnalyzeClearHeight(const imImage* image, int region_count, int min_threshold, int max_threshold )
 {
-	imushort* img_data = (imushort*)image->data[0];
-	int i;
-
-	// tableau pour les sommes par colonne, 1 largeur par region
-	int* heights = (int*)malloc( image->width * region_count * sizeof(int) );
-	memset(heights, 0, image->width * region_count * sizeof(int) );
-
-	for (i = 0; i < image->count; i++)
-	{
-		if (*img_data)
-			heights[ ((*img_data) - 1) * image->width + i % image->width ]++;
-		img_data++;
-	}
-
-	img_data = (imushort*)image->data[0];
-	for (i = 0; i < image->count; i++)
-	{
-		if (*img_data)
-		{
-			if ( heights[ ((*img_data) - 1) * image->width + i % image->width ] < min_threshold)
-				(*img_data) = 0;
-			else if ( max_threshold && (heights[ ((*img_data) - 1) * image->width + i % image->width ] > max_threshold) )
-				(*img_data) = 0;
-		}
-		img_data++;
-	}
-	free(heights);
+	cv::Mat src(image->height, image->width, CV_16UC1, image->data[0]);
+	ax::clear_height(src, region_count, min_threshold, max_threshold);
 }
 
 
@@ -606,35 +608,37 @@ void imAnalyzeClearMin(const imImage* image, int region_count, int threshold )
 	*image est une image labelisee (bg = 0, puis 1,2 ...)
 	region_count est le nombre de regions
  */
+namespace ax {
+
+void clear_width(cv::Mat& src, int region_count,
+                 int min_threshold, int max_threshold)
+{
+	if (src.type() != CV_16UC1 || region_count <= 0) return;
+
+	std::vector<int> widths(src.rows * region_count, 0);
+	const int count = src.rows * src.cols;
+	imushort *img_data = src.ptr<imushort>();
+	for (int i = 0; i < count; ++i) {
+		if (img_data[i])
+			widths[ (img_data[i] - 1) * src.rows + i / src.cols ]++;
+	}
+	for (int i = 0; i < count; ++i) {
+		if (img_data[i]) {
+			int w = widths[ (img_data[i] - 1) * src.rows + i / src.cols ];
+			if (w < min_threshold)
+				img_data[i] = 0;
+			else if (max_threshold && w > max_threshold)
+				img_data[i] = 0;
+		}
+	}
+}
+
+}  // namespace ax
+
 void imAnalyzeClearWidth(const imImage* image, int region_count, int min_threshold, int max_threshold )
 {
-	imushort* img_data = (imushort*)image->data[0];
-	int i;
-
-	// tableau pour les sommes par colonne, 1 largeur par region
-	int* widths = (int*)malloc( image->height * region_count * sizeof(int) );
-	memset(widths, 0, image->height * region_count * sizeof(int) );
-
-	for (i = 0; i < image->count; i++)
-	{
-		if (*img_data)
-			widths[ ((*img_data) - 1) * image->height + i / image->width ]++;
-		img_data++;
-	}
-
-	img_data = (imushort*)image->data[0];
-	for (i = 0; i < image->count; i++)
-	{
-		if (*img_data)
-		{
-			if ( widths[ ((*img_data) - 1) * image->height + i / image->width ] < min_threshold)
-				(*img_data) = 0;
-			else if ( max_threshold && (widths[ ((*img_data) - 1) * image->height + i / image->width ] > max_threshold) )
-				(*img_data) = 0;
-		}
-		img_data++;
-	}
-	free(widths);
+	cv::Mat src(image->height, image->width, CV_16UC1, image->data[0]);
+	ax::clear_width(src, region_count, min_threshold, max_threshold);
 }
 
 /*

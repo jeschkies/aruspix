@@ -42,6 +42,15 @@ void bounding_boxes(const cv::Mat& src, std::vector<int>& boxes,
 // is narrower or shorter than `threshold`.
 void clear_min(cv::Mat& src, int region_count, int threshold);
 
+// Zero out per-pixel: for each labeled pixel, count how many pixels
+// share its (label, column). If that count is < min_threshold or,
+// when max_threshold != 0, > max_threshold, zero the pixel. Same for
+// clear_width but per-row.
+void clear_height(cv::Mat& src, int region_count,
+                  int min_threshold, int max_threshold);
+void clear_width(cv::Mat& src, int region_count,
+                 int min_threshold, int max_threshold);
+
 }  // namespace ax
 
 #endif  // __cplusplus

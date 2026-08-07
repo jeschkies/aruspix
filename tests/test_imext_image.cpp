@@ -220,6 +220,94 @@ TEST_CASE("imAnalyzeClearMin: removes regions narrower or shorter than threshold
 }
 
 // ---------------------------------------------------------------------------
+// imAnalyzeClearHeight — zero labels whose per-column pixel count is
+// outside [min_threshold, max_threshold]. Per-pixel check: a region
+// tall in one column and short in another has its short-column pixels
+// zeroed even if the tall ones stay. max_threshold=0 disables the
+// upper bound.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("imAnalyzeClearHeight: pixels in short columns are zeroed, tall columns stay") {
+    // 5x4: label 1 forms an L (4 pixels tall in col 0, 1 pixel in col 1).
+    //      label 2 is two isolated pixels in row 1 at cols 3 and 4.
+    const unsigned short labels[20] = {
+        1, 1, 0, 0, 0,
+        1, 0, 0, 2, 2,
+        1, 0, 0, 0, 0,
+        1, 0, 0, 0, 0,
+    };
+    imImage *img = make_labeled(5, 4, labels);
+
+    imAnalyzeClearHeight(img, /*region_count=*/2,
+                         /*min_threshold=*/2, /*max_threshold=*/0);
+
+    auto *out = static_cast<unsigned short *>(img->data[0]);
+    // Label 1 col 0 has 4 px → kept. Col 1 has 1 px → cleared.
+    CHECK(out[0 * 5 + 0] == 1);
+    CHECK(out[1 * 5 + 0] == 1);
+    CHECK(out[0 * 5 + 1] == 0);
+    // Label 2 has 1 px in each of cols 3, 4 → both cleared.
+    CHECK(out[1 * 5 + 3] == 0);
+    CHECK(out[1 * 5 + 4] == 0);
+
+    imImageDestroy(img);
+}
+
+TEST_CASE("imAnalyzeClearHeight: max_threshold clears columns that are too tall") {
+    // Same L-shape as above.
+    const unsigned short labels[20] = {
+        1, 1, 0, 0, 0,
+        1, 0, 0, 0, 0,
+        1, 0, 0, 0, 0,
+        1, 0, 0, 0, 0,
+    };
+    imImage *img = make_labeled(5, 4, labels);
+
+    imAnalyzeClearHeight(img, /*region_count=*/1,
+                         /*min_threshold=*/1, /*max_threshold=*/3);
+
+    auto *out = static_cast<unsigned short *>(img->data[0]);
+    // Col 0 has 4 px, above max=3 → cleared.
+    CHECK(out[0 * 5 + 0] == 0);
+    CHECK(out[3 * 5 + 0] == 0);
+    // Col 1 has 1 px, within [1, 3] → kept.
+    CHECK(out[0 * 5 + 1] == 1);
+
+    imImageDestroy(img);
+}
+
+// ---------------------------------------------------------------------------
+// imAnalyzeClearWidth — same as ClearHeight but per-row (row-wise pixel
+// counts). Structurally mirrors ClearHeight.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("imAnalyzeClearWidth: pixels in short rows are zeroed, wide rows stay") {
+    // 5x4: label 1 has row 0 fully filled (4 wide) and one extra pixel
+    // dangling in row 1. Label 2 is a single pixel elsewhere.
+    const unsigned short labels[20] = {
+        1, 1, 1, 1, 0,
+        1, 0, 0, 0, 0,
+        0, 0, 0, 0, 2,
+        0, 0, 0, 0, 0,
+    };
+    imImage *img = make_labeled(5, 4, labels);
+
+    imAnalyzeClearWidth(img, /*region_count=*/2,
+                        /*min_threshold=*/2, /*max_threshold=*/0);
+
+    auto *out = static_cast<unsigned short *>(img->data[0]);
+    // Row 0 has 4 label-1 px → kept.
+    CHECK(out[0 * 5 + 0] == 1);
+    CHECK(out[0 * 5 + 3] == 1);
+    // Row 1 has 1 label-1 px → cleared.
+    CHECK(out[1 * 5 + 0] == 0);
+    // Row 2 has 1 label-2 px → cleared.
+    CHECK(out[2 * 5 + 4] == 0);
+
+    imImageDestroy(img);
+}
+
+// ---------------------------------------------------------------------------
 // imAnalyzeRuns — find peak / median run length
 // ---------------------------------------------------------------------------
 
