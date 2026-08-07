@@ -576,27 +576,33 @@ void imAnalyzeClearHeight(const imImage* image, int region_count, int min_thresh
 	*image est une image labelisee (bg = 0, puis 1,2 ...)
 	region_count est le nombre de regions
  */
+namespace ax {
+
+void clear_min(cv::Mat& src, int region_count, int threshold)
+{
+	if (src.type() != CV_16UC1 || region_count <= 0) return;
+
+	std::vector<int> boxes;
+	bounding_boxes(src, boxes, region_count);
+
+	const int count = src.rows * src.cols;
+	imushort *img_data = src.ptr<imushort>();
+	for (int i = 0; i < count; ++i) {
+		if (img_data[i]) {
+			int j = (img_data[i] - 1) * 4;
+			if ((boxes[j+1] - boxes[j+0] < threshold) ||
+			    (boxes[j+3] - boxes[j+2] < threshold))
+				img_data[i] = 0;
+		}
+	}
+}
+
+}  // namespace ax
+
 void imAnalyzeClearMin(const imImage* image, int region_count, int threshold )
 {
-	imushort* img_data = (imushort*)image->data[0];
-	int i, j;
-
-	int* boxes = (int*)malloc(4 * region_count * sizeof(int));
-    memset(boxes, 0, 4 *  region_count * sizeof(int));
-    imAnalyzeBoundingBoxes(image, boxes, region_count);
-
-	img_data = (imushort*)image->data[0];
-	for (i = 0; i < image->count; i++)
-	{
-		if (*img_data)
-		{
-			j = ((*img_data) - 1) * 4;
-			if ( (boxes[j+1] - boxes[j+0] < threshold) || (boxes[j+3] - boxes[j+2] < threshold) )
-				(*img_data) = 0;
-		}
-		img_data++;
-	}
-	free( boxes );
+	cv::Mat src(image->height, image->width, CV_16UC1, image->data[0]);
+	ax::clear_min(src, region_count, threshold);
 }
 
 /*
@@ -642,39 +648,43 @@ void imAnalyzeClearWidth(const imImage* image, int region_count, int min_thresho
 	region_count est le nombre de regions
 	boxes est tableau des bounding boxes 4 * region_count : pour chaque region xmin xmax ymin ymax
  */
+namespace ax {
+
+void bounding_boxes(const cv::Mat& src, std::vector<int>& boxes,
+                    int region_count)
+{
+	boxes.assign(4 * region_count, 0);
+	if (src.type() != CV_16UC1 || region_count <= 0) return;
+
+	for (int i = 0; i < region_count; ++i) {
+		boxes[4 * i + 0] = src.cols;
+		boxes[4 * i + 2] = src.rows;
+	}
+
+	const int count = src.rows * src.cols;
+	const imushort *img_data = src.ptr<imushort>();
+	for (int i = 0; i < count; ++i) {
+		if (img_data[i]) {
+			int idx = (img_data[i] - 1) * 4;
+			int x = i % src.cols;
+			int y = i / src.cols;
+			if (boxes[idx + 0] > x)      boxes[idx + 0] = x;
+			else if (boxes[idx + 1] < x) boxes[idx + 1] = x;
+			if (boxes[idx + 2] > y)      boxes[idx + 2] = y;
+			else if (boxes[idx + 3] < y) boxes[idx + 3] = y;
+		}
+	}
+}
+
+}  // namespace ax
+
 void imAnalyzeBoundingBoxes(const imImage* image, int* boxes, int region_count )
 {
-	// boxes = tableau des bounding boxes
-	// 4 * region_count : pour chaque region xmin xmax ymin ymax
-	int i;
-
-	for (i = 0; i < region_count; i++)
-	{
-		boxes[4 * i + 0] = image->width;
-		boxes[4 * i + 2] = image->height;
-	}
-
-	imushort* img_data = (imushort*)image->data[0];
-
-	int x, y, idx;
-	for (i = 0; i < image->count; i++)
-	{
-		if (*img_data)
-		{
-			idx = ((*img_data) - 1) * 4;
-			x = i % image->width;
-			y = i / image->width;
-			if ( boxes[ idx + 0 ] > x ) 
-				boxes[ idx + 0 ] = x;
-			else if ( boxes[ idx + 1 ] < x ) 
-				boxes[ idx + 1 ] = x;
-			if ( boxes[ idx + 2 ] > y ) 
-				boxes[ idx + 2 ] = y;
-			else if ( boxes[ idx + 3 ] < y ) 
-				boxes[ idx + 3 ] = y;
-		}
-		img_data++;
-	}
+	cv::Mat src(image->height, image->width, CV_16UC1,
+	            const_cast<void*>(image->data[0]));
+	std::vector<int> tmp;
+	ax::bounding_boxes(src, tmp, region_count);
+	std::copy(tmp.begin(), tmp.end(), boxes);
 }
 
 static unsigned char Kittler(const cv::Mat& src, double *mu_1, double *mu_2, double *mu)

@@ -28,6 +28,20 @@ void projection_h(const cv::Mat& src, std::vector<int>& hist);
 // `src` 8-bit single-channel. `hist` is resized to src.cols.
 void projection_v(const cv::Mat& src, std::vector<int>& hist);
 
+// Compute bounding boxes of a labeled 16-bit image. Label 0 is
+// background; labels 1..region_count are the foreground regions.
+// `boxes` is resized to 4*region_count and populated as
+//   [xmin, xmax, ymin, ymax]  per region, in label order.
+// Note: xmax/ymax are the pixel indices, not spans — a K-wide
+// region reports xmax-xmin = K-1. Callers that want cv::Rect
+// should add +1 to the span.
+void bounding_boxes(const cv::Mat& src, std::vector<int>& boxes,
+                    int region_count);
+
+// Zero out labels in a 16-bit labeled image whose bounding box
+// is narrower or shorter than `threshold`.
+void clear_min(cv::Mat& src, int region_count, int threshold);
+
 }  // namespace ax
 
 #endif  // __cplusplus
