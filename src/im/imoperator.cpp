@@ -12,7 +12,11 @@ using std::max;
 // For compilers that support precompilation, includes "wx/wx.h".
 #include "wx/wxprec.h"
 
+#include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
+
 #include "imoperator.h"
+#include "analyze.h"
 
 int ImOperator::s_pre_image_binarization_method = IM_BINARIZATION_OTSU;
 
@@ -409,35 +413,29 @@ bool ImOperator::GetImage( _imImage **image, int factor,  int binary_method, boo
 
 void ImOperator::PruneElementsZone( _imImage *image, int min_threshold, int max_threshold, int type )
 {
-    imImage *region_image = imImageCreate(image->width, image->height, IM_GRAY, IM_USHORT);
-    if (!region_image)
+    // Wrap the imImage's byte plane as a cv::Mat view in place.
+    cv::Mat src(image->height, image->width, CV_8UC1, image->data[0]);
+
+    // 4-connectivity labeling. connectedComponents' first return value
+    // includes label 0 (background), so the number of foreground
+    // regions is `num_labels - 1`.
+    cv::Mat labels;
+    int num_labels = cv::connectedComponents(src, labels, /*connectivity=*/4, CV_16U);
+    int region_count = num_labels - 1;
+    if (region_count <= 0)
         return;
 
-    int region_count = 0;
-    imAnalyzeFindRegions(image, region_image, 4, 1, &region_count);
-    if (region_count)
-    {
-        if  ( type == IM_PRUNE_CLEAR_HEIGHT ) // min height
-            imAnalyzeClearHeight(region_image, region_count, min_threshold, max_threshold);
-        else if  ( type == IM_PRUNE_CLEAR_WIDTH ) // min width
-            imAnalyzeClearWidth(region_image, region_count, min_threshold, max_threshold);
-		else // IM_PRUNE_CLEAR_MIN
-			imAnalyzeClearMin(region_image, region_count, min_threshold );
+    if      (type == IM_PRUNE_CLEAR_HEIGHT) ax::clear_height(labels, region_count, min_threshold, max_threshold);
+    else if (type == IM_PRUNE_CLEAR_WIDTH)  ax::clear_width (labels, region_count, min_threshold, max_threshold);
+    else /*    IM_PRUNE_CLEAR_MIN */        ax::clear_min   (labels, region_count, min_threshold);
 
-        imushort* region_data = (imushort*)region_image->data[0];
-        imbyte* img_data = (imbyte*)image->data[0];
-
-        for (int i = 0; i < image->count; i++)
-        {
-            if (*region_data)
-                *img_data = 1;
-            else
-                *img_data = 0;
-            region_data++;
-            img_data++;
-        }
+    // Rewrite the byte plane: any surviving label -> 1, else 0.
+    for (int y = 0; y < src.rows; ++y) {
+        const uint16_t* r = labels.ptr<uint16_t>(y);
+        uchar*          d = src.ptr<uchar>(y);
+        for (int x = 0; x < src.cols; ++x)
+            d[x] = r[x] ? 1 : 0;
     }
-    imImageDestroy(region_image);
 }
 
 
