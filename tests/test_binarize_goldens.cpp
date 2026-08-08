@@ -15,6 +15,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <sys/stat.h>
 #include <unordered_map>
 
 #include <doctest/doctest.h>
@@ -61,29 +62,63 @@ std::unordered_map<std::string, std::uint64_t> load_checksums(
     return out;
 }
 
-// On checksum mismatch: load the golden PNG, threshold back to 0/1,
-// and count differing pixels. Records a doctest INFO message with the
-// mismatch coordinates so the failure output is actionable.
-void report_diff(const std::string& golden_path, const cv::Mat& actual) {
-    cv::Mat golden_vis = cv::imread(golden_path, cv::IMREAD_GRAYSCALE);
-    if (golden_vis.empty()) {
-        INFO("golden PNG missing: " << golden_path);
-        return;
+// Result of a mismatch dump: a human-readable summary plus the paths
+// of the two artifacts written. Returned as one string so the calling
+// site can attach it to the CHECK via a single INFO scope.
+struct MismatchReport {
+    std::string summary;
+};
+
+// Ensure a directory exists; POSIX-only mkdir(2) is enough for the
+// test's needs and avoids pulling in <filesystem>.
+void ensure_dir(const std::string& path) {
+    std::string acc;
+    for (std::size_t i = 0; i <= path.size(); ++i) {
+        if (i == path.size() || path[i] == '/') {
+            if (!acc.empty()) mkdir(acc.c_str(), 0755);
+        }
+        if (i < path.size()) acc.push_back(path[i]);
     }
-    if (golden_vis.rows != actual.rows || golden_vis.cols != actual.cols) {
-        INFO("size mismatch: golden " << golden_vis.cols << "x"
-             << golden_vis.rows << " vs actual " << actual.cols << "x"
-             << actual.rows);
-        return;
+}
+
+// Write karsten/opencv's actual output (0->0, 1->255) and a color-coded
+// diff overlay against the golden. Returns a one-line summary suitable
+// for INFO.
+//   both agree it's background : black
+//   both agree it's ink        : gray  (128,128,128)
+//   golden-only ink            : red   (BGR 0,0,255) — port lost these
+//   actual-only ink            : green (BGR 0,255,0) — port gained these
+MismatchReport dump_diff(const std::string& fixtures_dir,
+                         const std::string& basename,
+                         const cv::Mat& actual /*0/1*/,
+                         const cv::Mat& golden_bin /*0/1*/) {
+    ensure_dir(fixtures_dir + "/actual");
+    ensure_dir(fixtures_dir + "/diff");
+    const std::string actual_path = fixtures_dir + "/actual/" + basename + ".png";
+    const std::string diff_path   = fixtures_dir + "/diff/"   + basename + ".png";
+
+    cv::imwrite(actual_path, actual * 255);
+
+    cv::Mat overlay(actual.rows, actual.cols, CV_8UC3, cv::Scalar(0, 0, 0));
+    for (int y = 0; y < actual.rows; ++y) {
+        const uchar* a = actual.ptr<uchar>(y);
+        const uchar* g = golden_bin.ptr<uchar>(y);
+        cv::Vec3b*   o = overlay.ptr<cv::Vec3b>(y);
+        for (int x = 0; x < actual.cols; ++x) {
+            bool ai = a[x] != 0, gi = g[x] != 0;
+            if (ai && gi)        o[x] = cv::Vec3b(128, 128, 128);  // agree ink
+            else if (gi && !ai)  o[x] = cv::Vec3b(0, 0, 255);      // red: golden-only
+            else if (ai && !gi)  o[x] = cv::Vec3b(0, 255, 0);      // green: actual-only
+        }
     }
-    cv::Mat golden;
-    cv::threshold(golden_vis, golden, 127, 1, cv::THRESH_BINARY);
-    int diff = 0;
-    for (int i = 0; i < golden.total(); ++i)
-        if (golden.data[i] != actual.data[i]) ++diff;
-    double pct = 100.0 * diff / golden.total();
-    INFO("pixel diff: " << diff << " (" << pct << "%) of "
-         << golden.total() << " total");
+    cv::imwrite(diff_path, overlay);
+
+    int diff = cv::countNonZero(actual != golden_bin);
+    double pct = 100.0 * diff / actual.total();
+    std::ostringstream ss;
+    ss << diff << " pixels (" << pct << "%) differ; see " << diff_path
+       << " (red=golden-only ink, green=actual-only ink) and " << actual_path;
+    return {ss.str()};
 }
 
 struct Case {
@@ -151,8 +186,26 @@ TEST_CASE("binarize_and_clean matches master goldens byte-for-byte") {
                         "no golden checksum for " << key);
 
         if (actual != it->second) {
-            report_diff(golden + "/" + c.image + "_" + c.method + ".png",
-                        binary);
+            const std::string basename = std::string(c.image) + "_" + c.method;
+            cv::Mat golden_vis = cv::imread(golden + "/" + basename + ".png",
+                                            cv::IMREAD_GRAYSCALE);
+            std::string report;
+            if (golden_vis.empty()) {
+                report = "golden PNG missing at " + golden + "/" + basename + ".png";
+            } else if (golden_vis.rows != binary.rows ||
+                       golden_vis.cols != binary.cols) {
+                std::ostringstream ss;
+                ss << "size mismatch: golden " << golden_vis.cols << "x"
+                   << golden_vis.rows << " vs actual " << binary.cols << "x"
+                   << binary.rows;
+                report = ss.str();
+            } else {
+                cv::Mat golden_bin;
+                cv::threshold(golden_vis, golden_bin, 127, 1, cv::THRESH_BINARY);
+                report = dump_diff(AX_FIXTURES_DIR, basename, binary,
+                                   golden_bin).summary;
+            }
+            INFO("mismatch: " << report);
         }
         CHECK(actual == it->second);
     }
