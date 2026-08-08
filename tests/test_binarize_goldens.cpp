@@ -12,10 +12,10 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
-#include <sys/stat.h>
 #include <unordered_map>
 
 #include <doctest/doctest.h>
@@ -69,16 +69,12 @@ struct MismatchReport {
     std::string summary;
 };
 
-// Ensure a directory exists; POSIX-only mkdir(2) is enough for the
-// test's needs and avoids pulling in <filesystem>.
+// Ensure a directory exists (portable across POSIX and Windows via
+// <filesystem>::create_directories). Silently ignores errors so the
+// mismatch reporting path stays best-effort.
 void ensure_dir(const std::string& path) {
-    std::string acc;
-    for (std::size_t i = 0; i <= path.size(); ++i) {
-        if (i == path.size() || path[i] == '/') {
-            if (!acc.empty()) mkdir(acc.c_str(), 0755);
-        }
-        if (i < path.size()) acc.push_back(path[i]);
-    }
+    std::error_code ec;
+    std::filesystem::create_directories(path, ec);
 }
 
 // Write karsten/opencv's actual output (0->0, 1->255) and a color-coded
