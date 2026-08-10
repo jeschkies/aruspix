@@ -191,6 +191,39 @@ void remove_by_area(const cv::Mat& src, cv::Mat& dst, int connectivity,
 	}
 }
 
+void calc_rotate_size(int width, int height, int *new_width, int *new_height,
+                      double cos0, double sin0)
+{
+	// Port of imProcessCalcRotateSize (IM's src/process/im_geometric.cpp).
+	// Sample the four corner pixel-centres (+0.5) around the image midpoint,
+	// rotate each, then take the axis-aligned bounding box + 1-pixel pad.
+	const double wd2 = double(width) / 2.0;
+	const double hd2 = double(height) / 2.0;
+
+	auto rotate_transf = [&](int x, int y, double &xl, double &yl) {
+		double xr = x + 0.5 - wd2;
+		double yr = y + 0.5 - hd2;
+		xl = ( xr * cos0 + yr * sin0);
+		yl = (-xr * sin0 + yr * cos0);
+	};
+
+	double xl, yl;
+	rotate_transf(0, 0, xl, yl);
+	double xmin = xl, xmax = xl, ymin = yl, ymax = yl;
+
+	auto sample = [&](int x, int y) {
+		rotate_transf(x, y, xl, yl);
+		if (xl < xmin) xmin = xl; if (xl > xmax) xmax = xl;
+		if (yl < ymin) ymin = yl; if (yl > ymax) ymax = yl;
+	};
+	sample(width - 1, height - 1);
+	sample(0,         height - 1);
+	sample(width - 1, 0);
+
+	*new_width  = (int)(xmax - xmin + 2.0);
+	*new_height = (int)(ymax - ymin + 2.0);
+}
+
 }  // namespace ax
 
 // Delegate to ax::set_data. imImage carries a depth (per-plane count)

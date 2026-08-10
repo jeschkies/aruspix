@@ -14,6 +14,7 @@ using std::max;
 
 #include "wx/file.h"
 
+#include "image_ops.h"
 #include "imregister.h"
 #include "impage.h"
 #include "imstaff.h"
@@ -597,7 +598,7 @@ bool ImRegister::Register( imPoint *points1, imPoint *points2)
 
     sin0 = sin(alpha1);
     cos0 = cos(alpha1);
-    imProcessCalcRotateSize( m_im1.cols, m_im1.rows, &new_w, &new_h, cos0, sin0 );
+    ax::calc_rotate_size( m_im1.cols, m_im1.rows, &new_w, &new_h, cos0, sin0 );
     // ajuster la position des m_reg_points
     m_reg_points1[0] = CalcPositionAfterRotation( m_reg_points1[0], alpha1, m_im1.cols, m_im1.rows, new_w, new_h);
     m_reg_points1[1] = CalcPositionAfterRotation( m_reg_points1[1], alpha1, m_im1.cols, m_im1.rows, new_w, new_h);
@@ -630,7 +631,7 @@ bool ImRegister::Register( imPoint *points1, imPoint *points2)
 
     sin0 = sin(alpha2);
     cos0 = cos(alpha2);
-    imProcessCalcRotateSize( m_im2.cols, m_im2.rows, &new_w, &new_h, cos0, sin0 );
+    ax::calc_rotate_size( m_im2.cols, m_im2.rows, &new_w, &new_h, cos0, sin0 );
     m_reg_points2[0] = CalcPositionAfterRotation( m_reg_points2[0], alpha2, m_im2.cols, m_im2.rows, new_w, new_h);
     m_reg_points2[1] = CalcPositionAfterRotation( m_reg_points2[1], alpha2, m_im2.cols, m_im2.rows, new_w, new_h);
     m_reg_points2[2] = CalcPositionAfterRotation( m_reg_points2[2], alpha2, m_im2.cols, m_im2.rows, new_w, new_h);

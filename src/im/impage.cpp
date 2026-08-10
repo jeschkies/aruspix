@@ -17,6 +17,7 @@ using std::max;
 #include <opencv2/imgproc.hpp>
 
 #include "binarize.h"
+#include "image_ops.h"
 #include "impage.h"
 #include "imstaff.h"
 #include "imstaffsegment.h"
@@ -648,10 +649,10 @@ bool ImPage::Deskew( double max_alpha )
         sin0 = sin( deg2rad( skew ) );
         cos0 = cos( deg2rad( skew ) );
 
-        imProcessCalcRotateSize( m_opImMap.cols, m_opImMap.rows,
+        ax::calc_rotate_size( m_opImMap.cols, m_opImMap.rows,
                               &new_w, &new_h, cos0, sin0);
 
-        imProcessCalcRotateSize( this->m_original_width, this->m_original_height,
+        ax::calc_rotate_size( this->m_original_width, this->m_original_height,
                               &this->m_rotated_width, &this->m_rotated_height, cos0, sin0);
 
         //new_w = m_opImMap.cols;

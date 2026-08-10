@@ -34,6 +34,14 @@ bool safe_crop(const cv::Mat& image, int *width, int *height,
 void remove_by_area(const cv::Mat& src, cv::Mat& dst, int connectivity,
                     int min_area, int max_area = 0);
 
+// Compute the bounding-box size of a (width x height) rectangle
+// rotated by an angle whose cosine/sine are `cos0` / `sin0`. Matches
+// imProcessCalcRotateSize's convention (samples the four corner
+// pixel-centres via a rotate_transf that offsets by 0.5 and 1-pixel
+// padding is added via `+ 2.0` before truncation).
+void calc_rotate_size(int width, int height, int *new_width, int *new_height,
+                      double cos0, double sin0);
+
 }  // namespace ax
 
 #endif  // __cplusplus
