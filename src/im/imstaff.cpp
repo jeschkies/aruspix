@@ -566,17 +566,13 @@ bool ImStaff::GetImageFromPage( cv::Mat &image, const cv::Mat &page, int y1, int
 		if ( image.empty() )
 			return this->Terminate( ERR_MEMORY );
 
-		ImView src_view(page, IM_GRAY);
-		ImView dst_view(image, IM_GRAY);
-		imProcessCrop( src_view, dst_view, m_x1, y1 );
+		page(cv::Rect(m_x1, y1, image.cols, image.rows)).copyTo(image);
 	} else {
 		image = cv::Mat( y1 - y2, m_x2 - m_x1, CV_8UC1 );
 		if ( image.empty() )
 			return this->Terminate( ERR_MEMORY );
 
-		ImView src_view(page, IM_GRAY);
-		ImView dst_view(image, IM_GRAY);
-		imProcessCrop( src_view, dst_view, m_x1, y2 );
+		page(cv::Rect(m_x1, y2, image.cols, image.rows)).copyTo(image);
 	}
     return true;
 }
@@ -655,11 +651,8 @@ bool ImStaff::GetStaffBorders( int threshold_in_percent, bool analyse_segments )
     m_opImTmp1 = cv::Mat( SS_STAFF_ROI_W / SS_FACTOR_1, m_opIm.cols, CV_8UC1 );
     if ( m_opImTmp1.empty() )
         return this->Terminate( ERR_MEMORY );
-    {
-        ImView src_view(m_opIm, IM_BINARY);
-        ImView dst_view(m_opImTmp1, IM_BINARY);
-        imProcessCrop( src_view, dst_view, 0, ( STAFF_HEIGHT -  SS_STAFF_ROI_W) / ( 2 * SS_FACTOR_1 ) );
-    }
+    m_opIm(cv::Rect(0, ( STAFF_HEIGHT -  SS_STAFF_ROI_W) / ( 2 * SS_FACTOR_1 ),
+                    m_opImTmp1.cols, m_opImTmp1.rows)).copyTo(m_opImTmp1);
 
     // analyse de la projection verticale
     int f_width, avg;
@@ -717,11 +710,8 @@ bool ImStaff::GetStaffBorders( int threshold_in_percent, bool analyse_segments )
             (m_segments[i].m_x2 - m_segments[i].m_x1) / SS_FACTOR_1, CV_8UC1 );
         if ( m_opImTmp1.empty() )
             return this->Terminate( ERR_MEMORY );
-        {
-            ImView src_view(m_opIm, IM_BINARY);
-            ImView dst_view(m_opImTmp1, IM_BINARY);
-            imProcessCrop( src_view, dst_view, m_segments[i].m_x1 / SS_FACTOR_1, 0 );
-        }
+        m_opIm(cv::Rect(m_segments[i].m_x1 / SS_FACTOR_1, 0,
+                        m_opImTmp1.cols, m_opImTmp1.rows)).copyTo(m_opImTmp1);
 
         /*m_opImTmp1 = imImageCreate( (m_segments[i].m_x2 - m_segments[i].m_x1),
             m_opImMap->height, m_opImMap->color_space, m_opImMap->data_type );
@@ -880,11 +870,7 @@ void ImStaff::CalcStaffHeight(const int staff, wxArrayPtrVoid params )
         if ( x + width > m_opIm.cols )
             break;
 
-        {
-            ImView src_view(m_opIm, IM_BINARY);
-            ImView dst_view(m_opImTmp1, IM_BINARY);
-            imProcessCrop( src_view, dst_view, x, 0 );
-        }
+        m_opIm(cv::Rect(x, 0, m_opImTmp1.cols, m_opImTmp1.rows)).copyTo(m_opImTmp1);
 
         {
             ImView v(m_opImTmp1, IM_BINARY);
@@ -968,11 +954,7 @@ void ImStaff::CalcCorrelation(const int staff, wxArrayPtrVoid params )
     {
         if ( x + width > m_opIm.cols )
             break;
-        {
-            ImView src_view(m_opIm, IM_BINARY);
-            ImView dst_view(m_opImTmp1, IM_BINARY);
-            imProcessCrop( src_view, dst_view, x, 0 );
-        }
+        m_opIm(cv::Rect(x, 0, m_opImTmp1.cols, m_opImTmp1.rows)).copyTo(m_opImTmp1);
         {
             ImView v(m_opImTmp1, IM_BINARY);
             imAnalyzeProjectionH( v, m_opHist );
@@ -1100,11 +1082,7 @@ void ImStaff::CalcFeatures(const int staff, wxArrayPtrVoid params )
         if ( x + width > m_opIm.cols )
             break;
 
-        {
-            ImView src_view(m_opIm, IM_BINARY);
-            ImView dst_view(m_opImTmp1, IM_BINARY);
-            imProcessCrop( src_view, dst_view, x, 0 );
-        }
+        m_opIm(cv::Rect(x, 0, m_opImTmp1.cols, m_opImTmp1.rows)).copyTo(m_opImTmp1);
 		CalcWinFeatures( m_opImTmp1, values + ( samples * FEATURES_COUNT ), m_positions[ x ], height, m_line_p[x] ); // 01 et al.
 		// CalcWinFeatures( m_opImTmp1, values + ( samples * FEATURES_COUNT ), m_positions[ x ], height, m_line_m[x] ); // 02
 		samples++;
@@ -1161,11 +1139,7 @@ void ImStaff::CalcLyricFeatures( const int staff, wxArrayPtrVoid params )
 //  The corrected image is saved in the src
 void ImStaff::CorrectLyricCurvature( cv::Mat &src, cv::Mat &dest )
 {
-	{
-		ImView src_view(src, IM_GRAY);
-		ImView dst_view(dest, IM_GRAY);
-		imProcessRotate90( src_view, dst_view, true );
-	}
+	cv::rotate(src, dest, cv::ROTATE_90_CLOCKWISE);
 
 	imbyte *buffer = dest.data;
 	imbyte *tmp = (imbyte*)malloc( dest.rows * dest.cols * sizeof( imbyte ) );
@@ -1180,11 +1154,7 @@ void ImStaff::CorrectLyricCurvature( cv::Mat &src, cv::Mat &dest )
 			memcpy( buffer + ( i * dest.cols ), tmp + ( i * dest.cols ), dest.cols );
 		}
 	}
-	{
-		ImView src_view(dest, IM_GRAY);
-		ImView dst_view(src, IM_GRAY);
-		imProcessRotate90( src_view, dst_view, false );
-	}
+	cv::rotate(dest, src, cv::ROTATE_90_COUNTERCLOCKWISE);
 	free ( tmp );
 }
 
@@ -1342,11 +1312,7 @@ void ImStaff::ExtractLyricImages( const int staff, wxArrayPtrVoid params )
 	else
 		m_opImTmp1 = cv::Mat( imageHeight, m_opIm.cols, CV_8UC1 );
 	m_opImTmp1.setTo(0);
-	{
-		ImView src_view(m_opIm, IM_GRAY);
-		ImView dst_view(m_opImTmp1, IM_GRAY);
-		imProcessCrop( src_view, dst_view, 0, top_offset );
-	}
+	m_opIm(cv::Rect(0, top_offset, m_opImTmp1.cols, m_opImTmp1.rows)).copyTo(m_opImTmp1);
 
 	// Save cropped lyric image
 	wxString image_filename = filename;
@@ -1379,11 +1345,7 @@ void ImStaff::ExtractLyricImages( const int staff, wxArrayPtrVoid params )
         if ( x + width > m_opImTmp1.cols )
             break;
 
-        {
-            ImView src_view(m_opImTmp1, IM_GRAY);
-            ImView dst_view(m_opImTmp2, IM_GRAY);
-            imProcessCrop( src_view, dst_view, x, 0 );
-        }
+        m_opImTmp1(cv::Rect(x, 0, m_opImTmp2.cols, m_opImTmp2.rows)).copyTo(m_opImTmp2);
 		if ( CalcLyricWinFeatures( m_opImTmp2, values + ( samples * LYRIC_FEATURES_COUNT ) ) ){
 			samples++;
 			white_spaces = 0;

@@ -687,22 +687,14 @@ bool ImRegister::Register( imPoint *points1, imPoint *points2)
     if ( m_opImTmp1.empty() )
         return this->Terminate( ERR_MEMORY );
 
-    {
-        ImView vs(m_im1, IM_GRAY);
-        ImView vd(m_opImTmp1, IM_GRAY);
-        imProcessCrop( vs, vd, minx1, miny1 );
-    }
+    m_im1(cv::Rect(minx1, miny1, m_opImTmp1.cols, m_opImTmp1.rows)).copyTo(m_opImTmp1);
     SwapImages( m_im1, m_opImTmp1 );
 
     m_opImTmp1 = cv::Mat(im_height, im_width, CV_8UC1);
     if ( m_opImTmp1.empty() )
         return this->Terminate( ERR_MEMORY );
 
-    {
-        ImView vs(m_im2, IM_GRAY);
-        ImView vd(m_opImTmp1, IM_GRAY);
-        imProcessCrop( vs, vd, minx2, miny2 );
-    }
+    m_im2(cv::Rect(minx2, miny2, m_opImTmp1.cols, m_opImTmp1.rows)).copyTo(m_opImTmp1);
     SwapImages( m_im2, m_opImTmp1 );
 
     // garder l'image original pour le fichier
@@ -728,9 +720,7 @@ bool ImRegister::Register( imPoint *points1, imPoint *points2)
     m_opImAlign.setTo( 255 );
     if ( m_im1.total() < m_opImAlign.total() )
     {
-        ImView va(m_opImAlign, IM_GRAY);
-        ImView vs(m_im1, IM_GRAY);
-        imSetData( va, vs, window.GetWidth(), window.GetHeight() );
+        m_im1.copyTo( m_opImAlign(cv::Rect(window.GetWidth(), window.GetHeight(), m_im1.cols, m_im1.rows)) );
     }
 	
     int c;
@@ -749,11 +739,7 @@ bool ImRegister::Register( imPoint *points1, imPoint *points2)
             return this->Terminate( ERR_CANCELED );
     
     imCounterEnd( m_counter );
-    {
-        ImView vs(m_opImAlign, IM_GRAY);
-        ImView vd(m_im2, IM_GRAY);
-        imProcessCrop( vs, vd, window.GetWidth(), window.GetHeight() );
-    }
+    m_opImAlign(cv::Rect(window.GetWidth(), window.GetHeight(), m_im2.cols, m_im2.rows)).copyTo(m_im2);
     ImageDestroy( m_opImAlign );
 
     if (!m_progressDlg->SetOperation( _("Writing image on disk ...") ) )
@@ -771,13 +757,7 @@ bool ImRegister::Register( imPoint *points1, imPoint *points2)
     cv::Mat r_neg, g_neg, b_xor;
     cv::bitwise_not( m_im1, r_neg );
     cv::bitwise_not( m_im2, g_neg );
-    {
-        ImView va(m_im1, IM_GRAY);
-        ImView vb(m_im2, IM_GRAY);
-        ImView vd(m_opImAlign, IM_GRAY);
-        imProcessBitwiseOp( va, vb, vd, IM_BIT_XOR );
-        //imProcessBitwiseOp( va, vb, vd, IM_BIT_AND );
-    }
+    cv::bitwise_xor( m_im1, m_im2, m_opImAlign );
     b_xor = m_opImAlign;
     cv::merge( std::vector<cv::Mat>{ b_xor, g_neg, r_neg }, m_result );
 
@@ -810,16 +790,8 @@ bool ImRegister::SubRegister( imPoint origine, imSize window, imSize size, int l
     if ( m_opImTmp2.empty() )
         return this->Terminate( ERR_MEMORY );
 
-    {
-        ImView vs1(m_im1, IM_GRAY);
-        ImView vd1(m_opImTmp1, IM_GRAY);
-        imProcessCrop( vs1, vd1, origine.x, origine.y);
-    }
-    {
-        ImView vs2(m_im2, IM_GRAY);
-        ImView vd2(m_opImTmp2, IM_GRAY);
-        imProcessCrop( vs2, vd2, origine.x, origine.y);
-    }
+    m_im1(cv::Rect(origine.x, origine.y, m_opImTmp1.cols, m_opImTmp1.rows)).copyTo(m_opImTmp1);
+    m_im2(cv::Rect(origine.x, origine.y, m_opImTmp2.cols, m_opImTmp2.rows)).copyTo(m_opImTmp2);
 
     m_progressDlg->SuspendCounter();
     DistByCorrelation( m_opImTmp1, m_opImTmp2, window, &x, &y, &maxCorr );
@@ -873,19 +845,11 @@ bool ImRegister::SubRegister( imPoint origine, imSize window, imSize size, int l
 
             //if (( row == 1 ) || ((row / plevel) == 1) || (column == 1) || ((column / plevel) == 1) ) // border only, for debug
             {
-                {
-                    ImView vs(m_im2, IM_GRAY);
-                    ImView vd(m_opImMask, IM_GRAY);
-                    imProcessCrop( vs, vd, pos_x, pos_y );
-                }
-                {
-                    ImView va(m_opImAlign, IM_GRAY);
-                    ImView vm(m_opImMask, IM_GRAY);
-                    imSetData( va, vm,
-                                (m_opImAlign.cols - m_im2.cols) / 2 + pos_x - x,
-                                (m_opImAlign.rows - m_im2.rows) / 2 + pos_y - y);
-                }
-
+                m_im2(cv::Rect(pos_x, pos_y, m_opImMask.cols, m_opImMask.rows)).copyTo(m_opImMask);
+                m_opImMask.copyTo( m_opImAlign(cv::Rect(
+                    (m_opImAlign.cols - m_im2.cols) / 2 + pos_x - x,
+                    (m_opImAlign.rows - m_im2.rows) / 2 + pos_y - y,
+                    m_opImMask.cols, m_opImMask.rows)) );
             }
             ImageDestroy( m_opImMask );
         }
@@ -925,17 +889,9 @@ bool ImRegister::SubRegister( imPoint origine, imSize window, imSize size, int l
 	if ( m_opImTmp1.empty() )
         return this->Terminate( ERR_MEMORY );
 
-    {
-        ImView vs(m_im2, IM_GRAY);
-        ImView vd(m_opImTmp1, IM_GRAY);
-        imProcessCrop( vs, vd, move_x, move_y);
-    }
+    m_im2(cv::Rect(move_x, move_y, m_opImTmp1.cols, m_opImTmp1.rows)).copyTo(m_opImTmp1);
     // actually move the data
-    {
-        ImView vd(m_im2, IM_GRAY);
-        ImView vs(m_opImTmp1, IM_GRAY);
-        imSetData( vd, vs, move_x - x, move_y - y);
-    }
+    m_opImTmp1.copyTo( m_im2(cv::Rect(move_x - x, move_y - y, m_opImTmp1.cols, m_opImTmp1.rows)) );
     ImageDestroy( m_opImTmp1 );
 
     // the problem here is that we have a recusion: we cannot use a m_opXXX image because it would be overriden
@@ -945,11 +901,7 @@ bool ImRegister::SubRegister( imPoint origine, imSize window, imSize size, int l
 	if ( buffer.empty() )
         return this->Terminate( ERR_MEMORY );
 
-    {
-        ImView vs(m_im2, IM_GRAY);
-        ImView vd(buffer, IM_GRAY);
-        imProcessCrop( vs, vd, origine.x - x, origine.y - y);
-    }
+    m_im2(cv::Rect(origine.x - x, origine.y - y, buffer.cols, buffer.rows)).copyTo(buffer);
     
     
 	origine.x -= x;
@@ -980,16 +932,8 @@ bool ImRegister::SubRegister( imPoint origine, imSize window, imSize size, int l
     m_opImTmp1 = cv::Mat( subsize2.GetHeight(), subsize2.GetWidth(), CV_8UC1 );
 	if ( m_opImTmp1.empty() )
 			return this->Terminate( ERR_MEMORY );
-    {
-        ImView vs(buffer, IM_GRAY);
-        ImView vd(m_opImTmp1, IM_GRAY);
-        imProcessCrop( vs, vd, origine2.x - origine1.x, origine2.y - origine1.y );
-    }
-    {
-        ImView vd(m_im2, IM_GRAY);
-        ImView vs(m_opImTmp1, IM_GRAY);
-        imSetData( vd, vs, origine2.x, origine2.y );
-    }
+    buffer(cv::Rect(origine2.x - origine1.x, origine2.y - origine1.y, m_opImTmp1.cols, m_opImTmp1.rows)).copyTo(m_opImTmp1);
+    m_opImTmp1.copyTo( m_im2(cv::Rect(origine2.x, origine2.y, m_opImTmp1.cols, m_opImTmp1.rows)) );
     ImageDestroy( m_opImTmp1 );
     if ( !SubRegister( origine2, subwindow, subsize2, level, row, column ) )
     {
@@ -1000,16 +944,8 @@ bool ImRegister::SubRegister( imPoint origine, imSize window, imSize size, int l
     m_opImTmp1 = cv::Mat( subsize3.GetHeight(), subsize3.GetWidth(), CV_8UC1 );
 	if ( m_opImTmp1.empty() )
 			return this->Terminate( ERR_MEMORY );
-    {
-        ImView vs(buffer, IM_GRAY);
-        ImView vd(m_opImTmp1, IM_GRAY);
-        imProcessCrop( vs, vd, 0, origine3.y - origine1.y );
-    }
-    {
-        ImView vd(m_im2, IM_GRAY);
-        ImView vs(m_opImTmp1, IM_GRAY);
-        imSetData( vd, vs, origine3.x, origine3.y );
-    }
+    buffer(cv::Rect(0, origine3.y - origine1.y, m_opImTmp1.cols, m_opImTmp1.rows)).copyTo(m_opImTmp1);
+    m_opImTmp1.copyTo( m_im2(cv::Rect(origine3.x, origine3.y, m_opImTmp1.cols, m_opImTmp1.rows)) );
     ImageDestroy( m_opImTmp1 );
     if ( !SubRegister( origine3, subwindow, subsize3, level, row, column - 1 ) )
     {
@@ -1021,16 +957,8 @@ bool ImRegister::SubRegister( imPoint origine, imSize window, imSize size, int l
     m_opImTmp1 = cv::Mat( subsize4.GetHeight(), subsize4.GetWidth(), CV_8UC1 );
 	if ( m_opImTmp1.empty() )
 			return this->Terminate( ERR_MEMORY );
-    {
-        ImView vs(buffer, IM_GRAY);
-        ImView vd(m_opImTmp1, IM_GRAY);
-        imProcessCrop( vs, vd, origine4.x - origine1.x, 0 );
-    }
-    {
-        ImView vd(m_im2, IM_GRAY);
-        ImView vs(m_opImTmp1, IM_GRAY);
-        imSetData( vd, vs, origine4.x, origine4.y );
-    }
+    buffer(cv::Rect(origine4.x - origine1.x, 0, m_opImTmp1.cols, m_opImTmp1.rows)).copyTo(m_opImTmp1);
+    m_opImTmp1.copyTo( m_im2(cv::Rect(origine4.x, origine4.y, m_opImTmp1.cols, m_opImTmp1.rows)) );
     ImageDestroy( m_opImTmp1 );
     if ( !SubRegister( origine4, subwindow, subsize4, level, row - 1, column ) )
     {

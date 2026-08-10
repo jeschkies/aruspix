@@ -174,27 +174,31 @@ bool ImOperator::ExtractPlane( cv::Mat &image, cv::Mat &extracted_plane, int pla
 	if ( !ConvertToMAP( image ) )
 		return false;
 
-    // Bridge to IM: the bit-plane ops on the IM_MAP-encoded bitmask.
-    // Keep behavior identical to the pre-swap path.
+    // Bridge to IM only for the bit-plane extract/reset on the IM_MAP-encoded
+    // classification bitmask; the surrounding bitwise/arithmetic ops go
+    // through cv:: directly.
     cv::Mat main_plane = image.clone();
 
-    ImView view_image(image, IM_MAP, m_opImMapPalette.data(), 256);
-    ImView view_main(main_plane, IM_MAP, m_opImMapPalette.data(), 256);
-    ImView view_extracted(extracted_plane, IM_MAP, m_opImMapPalette.data(), 256);
-
-    imProcessBitPlane( view_image, view_main, 0, 0);
-    imProcessBitPlane( view_image, view_image, 0, 1); // reset
-    imProcessBitwiseNot( view_main, view_main );
-    imProcessBitwiseOp( view_main, view_extracted, view_main, IM_BIT_OR );
-    imProcessBitwiseNot( view_main, view_main );
-    imProcessArithmeticOp( view_image, view_main, view_image, IM_BIN_ADD );
-
-    for (int i = 0; i < plane_number; i ++ )
     {
-        imProcessArithmeticOp( view_extracted, view_extracted, view_extracted, IM_BIN_ADD );
+        ImView view_image(image, IM_MAP, m_opImMapPalette.data(), 256);
+        ImView view_main(main_plane, IM_MAP, m_opImMapPalette.data(), 256);
+        imProcessBitPlane( view_image, view_main, 0, 0 );
+        imProcessBitPlane( view_image, view_image, 0, 1 ); // reset
     }
-    imProcessBitPlane( view_image, view_image, plane_number, 1); // reset
-    imProcessArithmeticOp( view_image, view_extracted, view_image, IM_BIN_ADD );
+    cv::bitwise_not( main_plane, main_plane );
+    cv::bitwise_or( main_plane, extracted_plane, main_plane );
+    cv::bitwise_not( main_plane, main_plane );
+    cv::add( image, main_plane, image );
+
+    for (int i = 0; i < plane_number; i++ )
+    {
+        cv::add( extracted_plane, extracted_plane, extracted_plane );
+    }
+    {
+        ImView view_image(image, IM_MAP, m_opImMapPalette.data(), 256);
+        imProcessBitPlane( view_image, view_image, plane_number, 1 ); // reset
+    }
+    cv::add( image, extracted_plane, image );
 
 	return true;
 }
@@ -412,7 +416,6 @@ void ImOperator::PruneElementsZone( cv::Mat &image, int min_threshold, int max_t
 
 void ImOperator::MoveElements( cv::Mat &src, cv::Mat &dest, int boxes[], int count, int margins[4], int factor )
 {
-    int color_space = IM_BINARY;
     for (int i = 0; i < count * 4; i += 4)
     {
         if ( (boxes[i+1] <= boxes[i+0]) || (boxes[i+3] <= boxes[i+2]) )
@@ -423,11 +426,7 @@ void ImOperator::MoveElements( cv::Mat &src, cv::Mat &dest, int boxes[], int cou
             (boxes[i+3] - boxes[i+2]) * factor,
             (boxes[i+1] - boxes[i+0]) * factor,
             CV_8UC1);
-        box.setTo(0); // imImageClear
-        {
-            ImView v(box, color_space);
-            imProcessBitwiseNot(v, v);
-        }
+        box.setTo(255); // white (setTo(0) + bitwise_not collapses to setTo(255))
 
         int mx1 = max( factor * boxes[i+0] - margins[0] , 0 );
         int mx2 = min( factor * boxes[i+1] + margins[1] , src.cols - 1 );
@@ -436,69 +435,24 @@ void ImOperator::MoveElements( cv::Mat &src, cv::Mat &dest, int boxes[], int cou
         int mmx1 = factor * boxes[i+0] - mx1;
         int mmy1 = factor * boxes[i+2] - my1;
 
-        cv::Mat box_m1(my2 - my1, mx2 - mx1, CV_8UC1);
-        {
-            ImView src_view(src, color_space);
-            ImView dst_view(box_m1, color_space);
-            imProcessCrop( src_view, dst_view, mx1, my1 );
-        }
-        {
-            ImView src_view(box, color_space);
-            ImView dst_view(box_m1, color_space);
-            imSetData( dst_view, src_view, mmx1, mmy1 );
-        }
+        cv::Mat box_m1 = src(cv::Rect(mx1, my1, mx2 - mx1, my2 - my1)).clone();
+        box.copyTo( box_m1(cv::Rect(mmx1, mmy1, box.cols, box.rows)) );
 
-        cv::Mat box_mm1(my2 - my1 + 2, mx2 - mx1 + 2, CV_8UC1);
+        cv::Mat box_mm1;
+        cv::copyMakeBorder(box_m1, box_mm1, 1, 1, 1, 1, cv::BORDER_CONSTANT, cv::Scalar(0));
         {
-            ImView src_view(box_m1, color_space);
-            ImView dst_view(box_mm1, color_space);
-            imProcessAddMargins( src_view, dst_view, 1, 1 );
-        }
-        {
-            ImView v(box_mm1, color_space);
+            ImView v(box_mm1, IM_BINARY);
             imProcessRemoveByArea( v, v, 4, box.rows * box.cols, 0, 0 );
         }
-        {
-            ImView src_view(box_mm1, color_space);
-            ImView dst_view(box_m1, color_space);
-            imProcessCrop( src_view, dst_view, 1, 1 );
-        }
-        {
-            ImView src_view(src, color_space);
-            ImView dst_view(box, color_space);
-            imProcessCrop( src_view, dst_view, mx1 + mmx1, my1 + mmy1 );
-        }
-        {
-            ImView src_view(box, color_space);
-            ImView dst_view(box_m1, color_space);
-            imSetData( dst_view, src_view, mmx1, mmy1 );
-        }
-        {
-            ImView src_view(box_m1, color_space);
-            ImView dst_view(dest, color_space);
-            imSetData( dst_view, src_view, mx1, my1 );
-        }
+        box_m1 = box_mm1(cv::Rect(1, 1, box_m1.cols, box_m1.rows)).clone();
+        src(cv::Rect(mx1 + mmx1, my1 + mmy1, box.cols, box.rows)).copyTo( box );
+        box.copyTo( box_m1(cv::Rect(mmx1, mmy1, box.cols, box.rows)) );
+        box_m1.copyTo( dest(cv::Rect(mx1, my1, box_m1.cols, box_m1.rows)) );
 
-        cv::Mat box_m2(my2 - my1, mx2 - mx1, CV_8UC1);
-        {
-            ImView src_view(src, color_space);
-            ImView dst_view(box_m2, color_space);
-            imProcessCrop( src_view, dst_view, mx1, my1 );
-        }
-        {
-            ImView v(box_m1, color_space);
-            imProcessBitwiseNot( v, v );
-        }
-        {
-            ImView view_m1(box_m1, color_space);
-            ImView view_m2(box_m2, color_space);
-            imProcessBitwiseOp( view_m1, view_m2, view_m2, IM_BIT_AND );
-        }
-        {
-            ImView src_view(box_m2, color_space);
-            ImView dst_view(src, color_space);
-            imSetData( dst_view, src_view, mx1, my1 );
-        }
+        cv::Mat box_m2 = src(cv::Rect(mx1, my1, mx2 - mx1, my2 - my1)).clone();
+        cv::bitwise_not( box_m1, box_m1 );
+        cv::bitwise_and( box_m1, box_m2, box_m2 );
+        box_m2.copyTo( src(cv::Rect(mx1, my1, box_m2.cols, box_m2.rows)) );
     }
 }
 

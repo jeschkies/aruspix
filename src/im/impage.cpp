@@ -329,11 +329,7 @@ void ImPage::Load( AxUndoFile *undoPtr )
 
 			input.Read( imTmp.data, imTmp.total() );
 
-			{
-				ImView v_img0(m_img0, IM_MAP, m_opImMapPalette.data(), 256);
-				ImView v_tmp(imTmp, IM_MAP, m_opImMapPalette.data(), 256);
-				imProcessInsert( v_img0, v_tmp, v_img0, m_selection_pos.x, m_selection_pos.y );
-			}
+			imTmp.copyTo(m_img0(cv::Rect(m_selection_pos.x, m_selection_pos.y, imTmp.cols, imTmp.rows)));
 		}
 	}
 }
@@ -1103,12 +1099,7 @@ bool ImPage::FindStaves( int min, int max, bool normalize, bool crop )
 		y2 = std::min ( m_opImMain.rows -1 , m_opLines1[nb_staves - 1] + 50 + ImPage::s_pre_margin_top ); // 150 px en dessus de la premiere portee
         this->m_y1 = m_opImMain.rows -1 - y2;
 
-		m_opImTmp1 = cv::Mat(y2 - y1, x2 - x1, CV_8UC1);
-		{
-			ImView vs(m_opImMain, IM_GRAY);
-			ImView vd(m_opImTmp1, IM_GRAY);
-			imProcessCrop( vs, vd, x1, y1);
-		}
+		m_opImTmp1 = m_opImMain(cv::Rect(x1, y1, x2 - x1, y2 - y1)).clone();
 		SwapImages( m_opImMain, m_opImTmp1 );
 		this->m_size = imSize( m_opImMain.cols, m_opImMain.rows );
 		SwapImages( m_img0, m_opImMain );
@@ -1116,13 +1107,11 @@ bool ImPage::FindStaves( int min, int max, bool normalize, bool crop )
 			*m_isModified = true;
 
 		// crop staves image
-		m_opImTmp1 = cv::Mat((y2 - y1) / (RESIZE_FACTOR * STAVES_CONV_REDUCTION),
-			(x2 - x1) / (RESIZE_FACTOR * STAVES_CONV_REDUCTION), CV_8UC1);
-		{
-			ImView vs(m_opIm, IM_GRAY);
-			ImView vd(m_opImTmp1, IM_GRAY);
-			imProcessCrop( vs, vd, x1  / (RESIZE_FACTOR * STAVES_CONV_REDUCTION), y1  / (RESIZE_FACTOR * STAVES_CONV_REDUCTION));
-		}
+		m_opImTmp1 = m_opIm(cv::Rect(
+			x1 / (RESIZE_FACTOR * STAVES_CONV_REDUCTION),
+			y1 / (RESIZE_FACTOR * STAVES_CONV_REDUCTION),
+			(x2 - x1) / (RESIZE_FACTOR * STAVES_CONV_REDUCTION),
+			(y2 - y1) / (RESIZE_FACTOR * STAVES_CONV_REDUCTION))).clone();
 		SwapImages( m_opIm, m_opImTmp1 );
 	}
 	else
@@ -1718,35 +1707,15 @@ bool ImPage::FindBorders( )
             return this->Terminate( ERR_MEMORY );
 
     // bord gauche
-    {
-        ImView vs(m_opIm, IM_BINARY);
-        ImView vd(m_opImMask, IM_BINARY);
-        imProcessCrop( vs, vd, 0, 0 );
-    }
+    m_opIm(cv::Rect(0, 0, m_opImMask.cols, m_opImMask.rows)).copyTo(m_opImMask);
     CleanBorder( m_opLines1, h1, m_opImMask, m_opImMain, 2 );
 
     // bord droit - flip
-    {
-        ImView vs(m_opIm, IM_BINARY);
-        ImView vd(m_opImTmp1, IM_BINARY);
-        imProcessMirror( vs, vd );
-    }
-    {
-        ImView vs(m_opImMain, IM_BINARY);
-        ImView vd(m_opImTmp2, IM_BINARY);
-        imProcessMirror( vs, vd );
-    }
-    {
-        ImView vs(m_opImTmp1, IM_BINARY);
-        ImView vd(m_opImMask, IM_BINARY);
-        imProcessCrop( vs, vd, 0, 0 );
-    }
+    cv::flip(m_opIm, m_opImTmp1, /*flipCode=*/1);
+    cv::flip(m_opImMain, m_opImTmp2, /*flipCode=*/1);
+    m_opImTmp1(cv::Rect(0, 0, m_opImMask.cols, m_opImMask.rows)).copyTo(m_opImMask);
     CleanBorder( m_opLines1, h1, m_opImMask, m_opImTmp2, 2 );
-    {
-        ImView vs(m_opImTmp2, IM_BINARY);
-        ImView vd(m_opImMain, IM_BINARY);
-        imProcessMirror( vs, vd );
-    }
+    cv::flip(m_opImTmp2, m_opImMain, /*flipCode=*/1);
 
     // fin gauche et droit
     ImageDestroy( m_opImTmp1 );
@@ -1766,50 +1735,18 @@ bool ImPage::FindBorders( )
             return this->Terminate( ERR_MEMORY );
 
     // bas
-    {
-        ImView vs(m_opIm, IM_BINARY);
-        ImView vd(m_opImTmp1, IM_BINARY);
-        imProcessRotate90( vs, vd, 1 );
-    }
-    {
-        ImView vs(m_opImMain, IM_BINARY);
-        ImView vd(m_opImTmp2, IM_BINARY);
-        imProcessRotate90( vs, vd, 1 );
-    }
-    {
-        ImView vs(m_opImTmp1, IM_BINARY);
-        ImView vd(m_opImMask, IM_BINARY);
-        imProcessCrop( vs, vd, 0, 0 );
-    }
+    cv::rotate(m_opIm, m_opImTmp1, cv::ROTATE_90_CLOCKWISE);
+    cv::rotate(m_opImMain, m_opImTmp2, cv::ROTATE_90_CLOCKWISE);
+    m_opImTmp1(cv::Rect(0, 0, m_opImMask.cols, m_opImMask.rows)).copyTo(m_opImMask);
     CleanBorder( m_opCols1, w1, m_opImMask, m_opImTmp2, 1 );
-    {
-        ImView vs(m_opImTmp2, IM_BINARY);
-        ImView vd(m_opImMain, IM_BINARY);
-        imProcessRotate90( vs, vd, -1 );
-    }
+    cv::rotate(m_opImTmp2, m_opImMain, cv::ROTATE_90_COUNTERCLOCKWISE);
 
     // haut
-    {
-        ImView vs(m_opIm, IM_BINARY);
-        ImView vd(m_opImTmp1, IM_BINARY);
-        imProcessRotate90( vs, vd, -1 );
-    }
-    {
-        ImView vs(m_opImMain, IM_BINARY);
-        ImView vd(m_opImTmp2, IM_BINARY);
-        imProcessRotate90( vs, vd, -1 );
-    }
-    {
-        ImView vs(m_opImTmp1, IM_BINARY);
-        ImView vd(m_opImMask, IM_BINARY);
-        imProcessCrop( vs, vd, 0, 0 );
-    }
+    cv::rotate(m_opIm, m_opImTmp1, cv::ROTATE_90_COUNTERCLOCKWISE);
+    cv::rotate(m_opImMain, m_opImTmp2, cv::ROTATE_90_COUNTERCLOCKWISE);
+    m_opImTmp1(cv::Rect(0, 0, m_opImMask.cols, m_opImMask.rows)).copyTo(m_opImMask);
     CleanBorder( m_opCols1, w1, m_opImMask, m_opImTmp2, 1 );
-    {
-        ImView vs(m_opImTmp2, IM_BINARY);
-        ImView vd(m_opImMain, IM_BINARY);
-        imProcessRotate90( vs, vd, 1 );
-    }
+    cv::rotate(m_opImTmp2, m_opImMain, cv::ROTATE_90_CLOCKWISE);
 
     // fin haut et bas
     ImageDestroy( m_opImTmp1 );
@@ -1822,11 +1759,8 @@ bool ImPage::FindBorders( )
         return false;
 
     cv::bitwise_not( m_opImTmp1, m_opImTmp1 );
-    {
-        ImView v1(m_opImTmp1, IM_BINARY);
-        ImView v2(m_opImMain, IM_BINARY);
-        imProcessArithmeticOp( v1, v2, v1, IM_BIT_OR );
-    }
+    // preserving pre-existing IM_BIT_OR-as-MUL bug
+    cv::multiply( m_opImTmp1, m_opImMain, m_opImTmp1 );
     //cv::bitwise_not( m_opImTmp1, m_opImTmp1 ); // removed in ax2 - not clear why needed
 
     if ( !ExtractPlane( m_opImMap, m_opImTmp1, IMAGE_BLANK ) )
@@ -1887,16 +1821,10 @@ void ImPage::CleanBorder( int rows[], int size, cv::Mat &border, cv::Mat &image,
     {
         y1 = (int)((double)sp / split * tmp.rows);
         y2 = (int)((double)(sp + 1) / split * tmp.rows);
-        cv::Mat tmp2b(y2 - y1, x2 - x1, CV_8UC1);
+        cv::Mat tmp2b = tmp(cv::Rect(x1, y1, x2 - x1, y2 - y1)).clone();
         if ( tmp2b.empty() )
         {
             return;
-        }
-
-        {
-            ImView vs(tmp, IM_BINARY);
-            ImView vd(tmp2b, IM_BINARY);
-            imProcessCrop( vs, vd, x1, y1 );
         }
 
         m_opHist = new int[ tmp2b.cols ];
@@ -2014,11 +1942,7 @@ bool ImPage::FindTextInStaves( )
         if ( (stave_y < 0) || (stave_y >= m_opImMain.rows) )
             continue;
 
-        {
-            ImView vs(m_opImMain, IM_BINARY);
-            ImView vd(m_opImTmp1, IM_BINARY);
-            imProcessCrop( vs, vd, x1, stave_y);
-        }
+        m_opImMain(cv::Rect(x1, stave_y, m_opImTmp1.cols, m_opImTmp1.rows)).copyTo(m_opImTmp1);
 		//this->m_staves[st].SetProgressDlg( m_progressDlg );
         this->m_staves[st].SetMapImage( m_opImTmp1 );
         this->m_staves[st].GetStaffBorders( 25, true );
@@ -2108,11 +2032,7 @@ bool ImPage::ExtractStaves( )
         if ( ( stave_y < 0 ) || ( stave_y >= m_opImMain.rows ) )
             continue;
 
-        {
-            ImView vs(m_opImMain, IM_BINARY);
-            ImView vd(m_opImTmp1, IM_BINARY);
-            imProcessCrop( vs, vd, x1, stave_y );
-        }
+        m_opImMain(cv::Rect(x1, stave_y, m_opImTmp1.cols, m_opImTmp1.rows)).copyTo(m_opImTmp1);
 		//this->m_staves[st].SetProgressDlg( m_progressDlg );
         this->m_staves[st].SetMapImage( m_opImTmp1 );
         this->m_staves[st].GetStaffBorders( 20, false );
@@ -2234,15 +2154,9 @@ bool ImPage::MagicSelection( int x, int y, AxImage *selection, int *xmin, int *y
     imImageDestroy(regions);
 
     // selection image
-    m_selection = cv::Mat(box[3] - box[2], box[1] - box[0], CV_8UC1);
+    m_selection = m_opImMain(cv::Rect(box[0], box[2], box[1] - box[0], box[3] - box[2])).clone();
     if ( m_selection.empty() )
         return this->Terminate( ERR_MEMORY );
-
-    {
-        ImView vs(m_opImMain, IM_BINARY);
-        ImView vd(m_selection, IM_BINARY);
-        imProcessCrop( vs, vd, box[0], box[2] );
-    }
 	m_selection_pos.x = box[0];
 	m_selection_pos.y = box[2];
 
@@ -2253,11 +2167,7 @@ bool ImPage::MagicSelection( int x, int y, AxImage *selection, int *xmin, int *y
 		return this->Terminate( ERR_MEMORY );
 
 	m_opImTmp1.setTo(0);
-	{
-		ImView v1(m_opImTmp1, IM_MAP, m_opImMapPalette.data(), 256);
-		ImView v2(m_selection, IM_BINARY);
-		imProcessArithmeticOp( v1, v2, v1, IM_BIN_ADD );
-	}
+	cv::add( m_opImTmp1, m_selection, m_opImTmp1 );
     long *pal = imPaletteGray();
     pal[0] = imColorEncode( 255, 255, 255 ); // fond blanc
     pal[1] = imColorEncode( 255, 0, 0 ); // rouge
@@ -2301,30 +2211,17 @@ bool ImPage::ChangeClassification( int _x1, int _y1, int _x2, int _y2, int plane
 
     // selection image
 	//ImageDestroy( m_selection );
-    m_opImTmp2 = cv::Mat(y2 - y1, x2 - x1, CV_8UC1);
+    m_opImTmp2 = m_opImMap(cv::Rect(x1, y1, x2 - x1, y2 - y1)).clone();
     if ( m_opImTmp2.empty() )
         return this->Terminate( ERR_MEMORY );
-
-	{
-		ImView vs(m_opImMap, IM_MAP, m_opImMapPalette.data(), 256);
-		ImView vd(m_opImTmp2, IM_MAP, m_opImMapPalette.data(), 256);
-		imProcessCrop( vs, vd, x1, y1 );
-	}
 
 	PrepareCheckPoint( UNDO_PART, IM_UNDO_CLASSIFICATION );
 
 	// imImageMakeBinary/imImageSetBinary: threshold to 0/1 (metadata drop).
 	cv::threshold(m_opImTmp2, m_opImTmp2, 0, 1, cv::THRESH_BINARY);
 
-	{
-		ImView v(m_opImTmp2, IM_BINARY);
-		imProcessArithmeticConstOp( v, pow(2, plane_number), v, IM_BIN_MUL );
-	}
-	{
-		ImView vmap(m_opImMap, IM_MAP, m_opImMapPalette.data(), 256);
-		ImView vsel(m_opImTmp2, IM_MAP, m_opImMapPalette.data(), 256);
-		imProcessInsert( vmap, vsel, vmap, m_selection_pos.x, m_selection_pos.y );
-	}
+	cv::multiply( m_opImTmp2, cv::Scalar((double)pow(2, plane_number)), m_opImTmp2 );
+	m_opImTmp2.copyTo(m_opImMap(cv::Rect(m_selection_pos.x, m_selection_pos.y, m_opImTmp2.cols, m_opImTmp2.rows)));
 
 	CheckPoint( UNDO_PART, IM_UNDO_CLASSIFICATION );
 
@@ -2354,14 +2251,9 @@ bool ImPage::ChangeClassification( int plane_number  )
         return this->Terminate( ERR_MEMORY );
 
 	// map selection from which the planes are extracted
-	m_opImTmp2 = m_opImTmp1.clone();
+	m_opImTmp2 = m_opImMap(cv::Rect(m_selection_pos.x, m_selection_pos.y, m_selection.cols, m_selection.rows)).clone();
     if ( m_opImTmp2.empty() )
         return this->Terminate( ERR_MEMORY );
-	{
-		ImView vs(m_opImMap, IM_MAP, m_opImMapPalette.data(), 256);
-		ImView vd(m_opImTmp2, IM_MAP, m_opImMapPalette.data(), 256);
-		imProcessCrop( vs, vd, m_selection_pos.x, m_selection_pos.y );
-	}
 
 	PrepareCheckPoint( UNDO_PART, IM_UNDO_CLASSIFICATION );
 
@@ -2380,38 +2272,21 @@ bool ImPage::ChangeClassification( int plane_number  )
 		}
 		if ( i == plane_number )
 		{
-			ImView v1(m_opImTmp1, IM_BINARY);
-			ImView v2(m_selection, IM_BINARY);
-			imProcessBitwiseOp( v1, v2, v1, IM_BIT_OR );
+			cv::bitwise_or( m_opImTmp1, m_selection, m_opImTmp1 );
 		}
 		else
 		{
 			cv::bitwise_not( m_opImTmp1, m_opImTmp1 );
-			{
-				ImView v1(m_opImTmp1, IM_BINARY);
-				ImView v2(m_selection, IM_BINARY);
-				imProcessBitwiseOp( v1, v2, v1, IM_BIT_OR );
-			}
+			cv::bitwise_or( m_opImTmp1, m_selection, m_opImTmp1 );
 			cv::bitwise_not( m_opImTmp1, m_opImTmp1 );
 		}
-		{
-			ImView v(m_opImTmp1, IM_BINARY);
-			imProcessArithmeticConstOp( v, pow(2, i), v, IM_BIN_MUL );
-		}
-		{
-			ImView v1(m_opImTmp1, IM_BINARY);
-			ImView v2(m_opImMain, IM_BINARY);
-			imProcessArithmeticOp( v1, v2, v2, IM_BIN_ADD );
-		}
+		cv::multiply( m_opImTmp1, cv::Scalar((double)pow(2, i)), m_opImTmp1 );
+		cv::add( m_opImTmp1, m_opImMain, m_opImMain );
 
     }
 	//ImageDestroy( m_selection );
 
-	{
-		ImView vmap(m_opImMap, IM_MAP, m_opImMapPalette.data(), 256);
-		ImView vmain(m_opImMain, IM_MAP, m_opImMapPalette.data(), 256);
-		imProcessInsert( vmap, vmain, vmap, m_selection_pos.x, m_selection_pos.y );
-	}
+	m_opImMain.copyTo(m_opImMap(cv::Rect(m_selection_pos.x, m_selection_pos.y, m_opImMain.cols, m_opImMain.rows)));
 
 	// for undo
 	ImageDestroy( m_opImTmp2 );
