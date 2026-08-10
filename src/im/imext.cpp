@@ -164,6 +164,33 @@ bool safe_crop(const cv::Mat& image, int *width, int *height,
 	return true;
 }
 
+void remove_by_area(const cv::Mat& src, cv::Mat& dst, int connectivity,
+                    int min_area, int max_area)
+{
+	if (src.empty() || src.type() != CV_8UC1) {
+		dst = src.clone();
+		return;
+	}
+	// Threshold to a 0/255 mask for connectedComponentsWithStats — it
+	// expects any non-zero value as foreground, but we normalize so the
+	// output preserves whatever foreground value (0/1 or 0/255) `src`
+	// used. We copy src into dst first, then zero the doomed labels.
+	if (&dst != &src) dst = src.clone();
+
+	cv::Mat labels, stats, centroids;
+	int n = cv::connectedComponentsWithStats(src, labels, stats, centroids,
+	                                          connectivity, CV_32S);
+	for (int label = 1; label < n; ++label) {
+		int area = stats.at<int>(label, cv::CC_STAT_AREA);
+		bool too_small = area < min_area;
+		bool too_big   = max_area > 0 && area > max_area;
+		if (too_small || too_big) {
+			cv::Mat mask = (labels == label);
+			dst.setTo(0, mask);
+		}
+	}
+}
+
 }  // namespace ax
 
 // Delegate to ax::set_data. imImage carries a depth (per-plane count)

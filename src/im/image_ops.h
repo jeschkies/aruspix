@@ -23,6 +23,17 @@ void set_data(cv::Mat& image, const cv::Mat& selection,
 bool safe_crop(const cv::Mat& image, int *width, int *height,
                int *pos_x, int *pos_y);
 
+// Zero out connected components whose area is outside
+// [min_area, max_area]. max_area == 0 means "no upper bound".
+// Mirrors imProcessRemoveByArea's semantics: `src` is an 8-bit
+// binary image (0/1 or 0/255), `dst` becomes the same image with
+// out-of-range foreground components zeroed. Foreground values are
+// preserved (whatever they were).
+//
+// `connectivity` matches OpenCV: 4 or 8.
+void remove_by_area(const cv::Mat& src, cv::Mat& dst, int connectivity,
+                    int min_area, int max_area = 0);
+
 }  // namespace ax
 
 #endif  // __cplusplus

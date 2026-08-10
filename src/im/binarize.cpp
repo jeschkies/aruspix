@@ -4,6 +4,7 @@
 
 #include <opencv2/imgproc.hpp>
 
+#include "image_ops.h"
 #include "thresholds.h"
 
 namespace ax {
@@ -101,18 +102,8 @@ bool binarize_and_clean(const cv::Mat &src_gray, cv::Mat &dst_binary,
     }
 
     // 7. Remove small connected components by area (8-connectivity).
-    cv::Mat labels, stats, centroids;
-    int n = cv::connectedComponentsWithStats(bordered, labels, stats,
-                                             centroids, 8, CV_32S);
-    // Label 0 is the background; iterate over foreground labels.
-    for (int label = 1; label < n; ++label) {
-        int area = stats.at<int>(label, cv::CC_STAT_AREA);
-        if (area < area_threshold) {
-            // Zero out this component.
-            cv::Mat mask = (labels == label);
-            bordered.setTo(0, mask);
-        }
-    }
+    ax::remove_by_area(bordered, bordered, /*connectivity=*/8,
+                       /*min_area=*/area_threshold);
 
     // 8. Strip the 1-pixel border back off.
     dst_binary = bordered(cv::Rect(1, 1, src_gray.cols, src_gray.rows)).clone();
