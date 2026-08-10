@@ -12,6 +12,8 @@
     #include "wx/wx.h"
 #endif
 
+#include <opencv2/core.hpp>
+
 #include "im/imoperator.h"
 
 
@@ -49,12 +51,12 @@ public:
     int CalcIndentation( int leftmargin );
     int CalcEcart( int previous );
 	void GetXandPos( int posx, int *x, int *vpos ); // return the x position in the staff (remove margin)
-													// and the vertical position (decalage) from m_positions in segment	
-	void CorrectLyricCurvature( imImage *src, imImage *dest );
-	void FindLyricBaseLine( imImage *src, double *overallProjection, int *offsets, int windowWidth );
-	
-	// functors																								
-	bool GetImageFromPage( _imImage **image, _imImage *page, int y1, int y2 = -1 );
+													// and the vertical position (decalage) from m_positions in segment
+	void CorrectLyricCurvature( cv::Mat &src, cv::Mat &dest );
+	void FindLyricBaseLine( cv::Mat &src, double *overallProjection, int *offsets, int windowWidth );
+
+	// functors
+	bool GetImageFromPage( cv::Mat &image, const cv::Mat &page, int y1, int y2 = -1 );
 	bool WriteMFC( wxString filename, int samplesCount, int period, int sampleSize, float *samples );
 
     // functors

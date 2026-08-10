@@ -221,27 +221,30 @@ void SupFile::GetSrc1( AxImage *image )
 {
 	wxASSERT_MSG( image, "AxImage cannot be NULL" );
 	wxASSERT_MSG( m_imRegisterPtr, "m_imRegisterPtr cannot be NULL" );
-	wxASSERT_MSG( m_imRegisterPtr->m_src1, "Src1 cannot be NULL" );
-	
-	SetImImage( m_imRegisterPtr->m_src1, image );
+	wxASSERT_MSG( !m_imRegisterPtr->m_src1.empty(), "Src1 cannot be NULL" );
+
+	ImView v( m_imRegisterPtr->m_src1, IM_GRAY );
+	SetImImage( v, image );
 }
 
 void SupFile::GetSrc2( AxImage *image )
 {
 	wxASSERT_MSG( image, "AxImage cannot be NULL" );
 	wxASSERT_MSG( m_imRegisterPtr, "m_imRegisterPtr cannot be NULL" );
-	wxASSERT_MSG( m_imRegisterPtr->m_src2, "Src2 cannot be NULL" );
-	
-	SetImImage( m_imRegisterPtr->m_src2, image );
+	wxASSERT_MSG( !m_imRegisterPtr->m_src2.empty(), "Src2 cannot be NULL" );
+
+	ImView v( m_imRegisterPtr->m_src2, IM_GRAY );
+	SetImImage( v, image );
 }
 
 void SupFile::GetResult( AxImage *image )
 {
 	wxASSERT_MSG( image, "AxImage cannot be NULL" );
 	wxASSERT_MSG( m_imRegisterPtr, "m_imRegisterPtr cannot be NULL" );
-	wxASSERT_MSG( m_imRegisterPtr->m_result, "Result image cannot be NULL" );
-	
-	SetImImage( m_imRegisterPtr->m_result, image );
+	wxASSERT_MSG( !m_imRegisterPtr->m_result.empty(), "Result image cannot be NULL" );
+
+	ImView v( m_imRegisterPtr->m_result, IM_RGB );
+	SetImImage( v, image );
 }
 
 bool SupFile::CancelSuperimposition(bool ask_user)

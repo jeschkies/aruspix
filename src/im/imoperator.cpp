@@ -12,6 +12,7 @@ using std::max;
 // For compilers that support precompilation, includes "wx/wx.h".
 #include "wx/wxprec.h"
 
+#include <cstring>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 
@@ -31,53 +32,28 @@ ImOperator::ImOperator( )
     m_progressDlg = NULL;
     m_error = ERR_NONE;
 
-    m_opImAlign = NULL;
-    m_opImMask = NULL;
-    m_opImTmp2 = NULL;
-    m_opImTmp1 = NULL;
-    m_opImMain = NULL;
-    m_opIm = NULL;
-    m_opImMap = NULL;
-
     m_opHist = NULL;
     m_opLines1 = NULL;
     m_opLines2 = NULL;
     m_opCols1 = NULL;
-	
+
 	m_pre_image_binarization_methodPtr = &ImOperator::s_pre_image_binarization_method;
+    m_opImMapPalette.fill(0);
 }
 
 ImOperator::~ImOperator()
 {
 }
 
-void ImOperator::SwapImages( _imImage **image1, _imImage **image2 )
-{
-    ImageDestroy( image1 );
-    *image1 = *image2;
-    *image2 = NULL;
-}
-
-void ImOperator::ImageDestroy( _imImage **image )
-{
-    if ( *image )
-    {
-        imImageDestroy( *image );
-        *image = NULL;
-    }
-
-}
-
 bool ImOperator::Terminate( int code, ... )
 {
-    // Attention que deux de ces pointeurs ne refere pas la meme adresse lors de l'appel de cette methode !
-    ImageDestroy( &m_opImAlign );
-    ImageDestroy( &m_opImMask );
-    ImageDestroy( &m_opImTmp2 );
-    ImageDestroy( &m_opImTmp1 );
-    ImageDestroy( &m_opImMain );
-    ImageDestroy( &m_opIm );
-    ImageDestroy( &m_opImMap );
+    ImageDestroy(m_opImAlign);
+    ImageDestroy(m_opImMask);
+    ImageDestroy(m_opImTmp2);
+    ImageDestroy(m_opImTmp1);
+    ImageDestroy(m_opImMain);
+    ImageDestroy(m_opIm);
+    ImageDestroy(m_opImMap);
 
     if ( m_opHist )
         delete[] m_opHist;
@@ -121,7 +97,7 @@ bool ImOperator::Terminate( int code, ... )
         msg.PrintfV( _("Error reading image %d in file '%s'") , argptr );
     else if ( code == ERR_WRITING )
         msg.PrintfV( _("Error writing image in file '%s'") , argptr );
-    
+
     va_end(argptr);
     wxLogError( msg );
     return false;
@@ -133,79 +109,103 @@ void ImOperator::SetProgressDlg( AxProgressDlg *dlg )
     m_progressDlg = dlg;
 }
 
-void ImOperator::SetMapImage( _imImage *image )
+void ImOperator::SetMapImage( const cv::Mat &image )
 {
-    ImageDestroy( &m_opImMap );
-    m_opImMap = imImageDuplicate( image );
+    ImageDestroy(m_opImMap);
+    m_opImMap = image.clone();
 }
 
-bool ImOperator::Read( wxString file, _imImage **image, int index )
+bool ImOperator::Read( wxString file, cv::Mat &image, int index )
 {
 	wxASSERT_MSG( !file.IsEmpty(), "Filename  cannot be empty" );
 
-    int error, width, height, color_mode, data_type;
-
-    if ( image == NULL )
-    {
-        ImageDestroy( &m_opImMap );
-        image = &m_opImMap;
-    }
+    int error;
 
     imFile* ifile = imFileOpen( file.c_str(), &error );
     if ( !ifile )
         return this->Terminate( ERR_FILE , (const char*)file.c_str() );
 
-    imFileReadImageInfo( ifile, index, &width, &height, &color_mode, &data_type );
-    *image = imFileLoadBitmap( ifile, index, &error);
+    // Load bitmap through IM; then copy into a cv::Mat, normalising to
+    // single-channel 8-bit. Multi-channel (IM_RGB) sources are converted
+    // via imConvertColorSpace before the copy so the numeric behaviour
+    // matches the pre-swap pipeline.
+    _imImage *loaded = imFileLoadBitmap( ifile, index, &error );
     imFileClose(ifile);
-    if (!*image)
+    if ( !loaded )
         return this->Terminate( ERR_READING , index, (const char*)file.c_str() );
-    else 
-        return true;
+
+    // Force IM_BYTE.
+    if ( loaded->data_type != IM_BYTE ) {
+        _imImage *tmp = imImageCreate( loaded->width, loaded->height, loaded->color_space, IM_BYTE );
+        if (!tmp) { imImageDestroy(loaded); return this->Terminate( ERR_MEMORY ); }
+        imConvertDataType( loaded, tmp, 0, 0, 0, 0 );
+        imImageDestroy(loaded);
+        loaded = tmp;
+    }
+
+    ImageDestroy(image);
+    // Normalise RGB → grayscale at load time so downstream code always
+    // sees single-channel 8-bit buffers. Use IM's own imConvertColorSpace
+    // so the numeric behaviour matches the pre-swap pipeline.
+    if ( imColorModeMatch(loaded->color_space, IM_RGB) ) {
+        _imImage *gray = imImageCreate(loaded->width, loaded->height, IM_GRAY, IM_BYTE);
+        if (!gray) { imImageDestroy(loaded); return this->Terminate( ERR_MEMORY ); }
+        imConvertColorSpace(loaded, gray);
+        imImageDestroy(loaded);
+        loaded = gray;
+    }
+
+    image.create(loaded->height, loaded->width, CV_8UC1);
+    std::memcpy(image.data, loaded->data[0], (size_t)loaded->height * loaded->width);
+    if ( imColorModeMatch(loaded->color_space, IM_MAP) ) {
+        // preserve palette metadata on the operator so WriteAsMAP can restore it later
+        long *pal = loaded->palette;
+        if (pal) {
+            for (int i = 0; i < loaded->palette_count && i < 256; ++i)
+                m_opImMapPalette[i] = pal[i];
+        }
+    }
+    imImageDestroy(loaded);
+    return true;
 }
 
-bool ImOperator::ExtractPlane( _imImage **image, _imImage **extrated_plane, int plane_number  )
+bool ImOperator::ExtractPlane( cv::Mat &image, cv::Mat &extracted_plane, int plane_number  )
 {
 	if ( !ConvertToMAP( image ) )
 		return false;
 
-	imImage *main_plane = imImageClone( *image );
-    if (!main_plane)
-        return this->Terminate( ERR_MEMORY );
+    // Bridge to IM: the bit-plane ops on the IM_MAP-encoded bitmask.
+    // Keep behavior identical to the pre-swap path.
+    cv::Mat main_plane = image.clone();
 
-    imProcessBitPlane( *image, main_plane, 0, 0);
-    imProcessBitPlane( *image, *image, 0, 1); // reset
-    imProcessBitwiseNot( main_plane, main_plane );
-    imProcessBitwiseOp( main_plane, *extrated_plane, main_plane, IM_BIT_OR );
-    imProcessBitwiseNot( main_plane, main_plane );
-    imProcessArithmeticOp( *image, main_plane, *image, IM_BIN_ADD );
-        
+    ImView view_image(image, IM_MAP, m_opImMapPalette.data(), 256);
+    ImView view_main(main_plane, IM_MAP, m_opImMapPalette.data(), 256);
+    ImView view_extracted(extracted_plane, IM_MAP, m_opImMapPalette.data(), 256);
+
+    imProcessBitPlane( view_image, view_main, 0, 0);
+    imProcessBitPlane( view_image, view_image, 0, 1); // reset
+    imProcessBitwiseNot( view_main, view_main );
+    imProcessBitwiseOp( view_main, view_extracted, view_main, IM_BIT_OR );
+    imProcessBitwiseNot( view_main, view_main );
+    imProcessArithmeticOp( view_image, view_main, view_image, IM_BIN_ADD );
+
     for (int i = 0; i < plane_number; i ++ )
     {
-        imProcessArithmeticOp( *extrated_plane, *extrated_plane, *extrated_plane, IM_BIN_ADD );
+        imProcessArithmeticOp( view_extracted, view_extracted, view_extracted, IM_BIN_ADD );
     }
-    imProcessBitPlane( *image, *image, plane_number, 1); // reset
-    imProcessArithmeticOp( *image, *extrated_plane, *image, IM_BIN_ADD );
-    imImageDestroy( main_plane );
-	
+    imProcessBitPlane( view_image, view_image, plane_number, 1); // reset
+    imProcessArithmeticOp( view_image, view_extracted, view_image, IM_BIN_ADD );
+
 	return true;
 }
 
 
-bool ImOperator::ConvertToMAP( _imImage **image )
+bool ImOperator::ConvertToMAP( cv::Mat &image )
 {
-    if ( !imColorModeMatch( (*image)->color_space, IM_MAP ) ) // binary image as input
-    {
-        imImage *tmp = imImageCreate( (*image)->width, (*image)->height, IM_MAP, IM_BYTE );
-        if (!tmp)
-            return this->Terminate( ERR_MEMORY );
-			
-        imImageSetBinary( *image );
-        imImageClear( tmp );
-        imProcessArithmeticOp( tmp, *image, tmp, IM_BIN_ADD );
-		SwapImages( image, &tmp );
-    }
-
+    // In the new storage model, the image is always single-plane 8-bit.
+    // ConvertToMAP historically wrapped a binary image (values 0/1) as MAP.
+    // Nothing to do to the buffer — just refresh the palette metadata for
+    // downstream WriteAsMAP().
     long *pal = imPaletteGray();
     pal[0] = imColorEncode( 255, 255, 255 ); // fond blanc
     pal[1] = imColorEncode( 0, 0, 0 ); // noir
@@ -216,32 +216,31 @@ bool ImOperator::ConvertToMAP( _imImage **image )
     pal[32] = imColorEncode( 255, 227, 0 ); // jaune = titre
     pal[64] = imColorEncode( 0, 0, 255 ); // bleu =
     pal[128] = imColorEncode( 255, 0, 255 ); // magenta =
-    imImageSetPalette( *image, pal, 256 );
-	
+    for (int i = 0; i < 256; ++i) m_opImMapPalette[i] = pal[i];
+    (void)image;
 	return true;
 }
 
 
-bool ImOperator::WriteAsMAP( wxString file, _imImage **image )
+bool ImOperator::WriteAsMAP( wxString file, cv::Mat &image )
 {
 	wxASSERT_MSG( !file.IsEmpty(), "Filename  cannot be empty" );
 
 	if ( !ConvertToMAP( image ) )
 		return false;
 
+    ImView view(image, IM_MAP, m_opImMapPalette.data(), 256);
+
     int error;
     imFile *ifile = imFileNew( file.c_str(), "TIFF", &error);
     if (error == IM_ERR_NONE)
     {
-        imFileSetInfo( ifile, "RLE" ); // LZW Unisys par defaut
-        imImageSetAttribute( *image, "Software", IM_BYTE, 8, "Aruspix" );
-        imImageSetAttribute( *image, "Author", IM_BYTE, 14, "Laurent Pugin" );
-        // for some reason since version 2.0 and imlib 3.6, we have an error on tags
-        // we just ignore it since the file written looks OK
+        imFileSetInfo( ifile, "RLE" );
+        imImageSetAttribute( view, "Software", IM_BYTE, 8, "Aruspix" );
+        imImageSetAttribute( view, "Author", IM_BYTE, 14, "Laurent Pugin" );
         wxLogNull logNo;
-        error = imFileSaveImage( ifile, *image );
+        error = imFileSaveImage( ifile, view );
         imFileClose(ifile);
-        //wxLogMessage("Fichier '%s' ecrit - erreur %d", file.c_str(), error );
     }
 
     if (error == IM_ERR_NONE)
@@ -251,34 +250,26 @@ bool ImOperator::WriteAsMAP( wxString file, _imImage **image )
 }
 
 
-bool ImOperator::Write( wxString file, _imImage **image )
+bool ImOperator::Write( wxString file, const cv::Mat &image )
 {
 	wxASSERT_MSG( !file.IsEmpty(), "Filename  cannot be empty" );
 
     int error;
-    
-#if !defined(__WXMSW__) 
-    //wxFFile f( file, "w" ); // necessaire sous Linux pour les masques de fichiers
-    //f.Flush();
-    //f.Close();
-    //AxYield();
-#endif
+    int channels = image.channels();
+    int color_space = (channels == 3) ? IM_RGB : IM_GRAY;
+    ImView view(image, color_space);
 
-	//printf(file.c_str());
     imFile *ifile = imFileNew( file.c_str(), "TIFF", &error);
     if (error == IM_ERR_NONE)
     {
-        imFileSetInfo( ifile, "RLE" ); // LZW Unisys par defaut
-        imImageSetAttribute( *image, "Software", IM_BYTE, 8, "Aruspix" );
-        imImageSetAttribute( *image, "Author", IM_BYTE, 14, "Laurent Pugin" );
-        imImageSetAttribute( *image, "Photometric", IM_BYTE,1,"1");
-        // for some reason since version 2.0 and imlib 3.6, we have an error on tags
-        // we just ignore it since the file written looks OK
+        imFileSetInfo( ifile, "RLE" );
+        imImageSetAttribute( view, "Software", IM_BYTE, 8, "Aruspix" );
+        imImageSetAttribute( view, "Author", IM_BYTE, 14, "Laurent Pugin" );
+        imImageSetAttribute( view, "Photometric", IM_BYTE, 1, "1");
         wxLogNull *logNo = new wxLogNull();
-        error = imFileSaveImage( ifile, *image );
+        error = imFileSaveImage( ifile, view );
 		imFileClose(ifile);
         delete logNo;
-        //wxLogMessage("Fichier '%s - erreur %d' ecrit", file.c_str(), error );
         if (error == IM_ERR_NONE)
             return true;
         else
@@ -288,139 +279,119 @@ bool ImOperator::Write( wxString file, _imImage **image )
         return this->Terminate( ERR_WRITING , (const char*)file.c_str());
 }
 
-bool ImOperator::GetImagePlane( _imImage **image , int plane, int factor )
+bool ImOperator::GetImagePlane( cv::Mat &image , int plane, int factor )
 {
-    wxASSERT_MSG( !(*image), "Image pointer must be NULL");
-
-    imImage *imTmp;
-
-    if ( m_opImMap == NULL )
+    if ( m_opImMap.empty() )
         return this->Terminate( ERR_UNKNOWN );
-    
-    ImageDestroy( image );
-    *image = imImageCreate( m_opImMap->width, m_opImMap->height, IM_BINARY, IM_BYTE );
-    if ( !*image )
-        return this->Terminate( ERR_MEMORY );
-    imProcessBitPlane( m_opImMap, *image, plane, 0 );
+
+    ImageDestroy(image);
+    // Extract bit-plane through IM to preserve exact semantics.
+    image.create(m_opImMap.rows, m_opImMap.cols, CV_8UC1);
+    {
+        ImView src_view(m_opImMap, IM_MAP, m_opImMapPalette.data(), 256);
+        ImView dst_view(image, IM_BINARY);
+        imProcessBitPlane( src_view, dst_view, plane, 0 );
+    }
 
     // resize
     for(int i = 1; i < factor; i*= 2 )
     {
-        int removeX = (*image)->width % 2;
-        int removeY = (*image)->height % 2;
-        if (removeX || removeY) // controler si width ou height sont impaires -> si oui, crop image
-        {
-            imTmp = imImageCreate( (*image)->width - removeX, (*image)->height - removeY,
-                (*image)->color_space, (*image)->data_type);
-            if ( !imTmp )
-                return this->Terminate( ERR_MEMORY );
-
-            imProcessCrop( *image, imTmp, 0, 0);
-            SwapImages( image, &imTmp );
+        int removeX = image.cols % 2;
+        int removeY = image.rows % 2;
+        if (removeX || removeY) {
+            image = image(cv::Rect(0, 0, image.cols - removeX, image.rows - removeY)).clone();
         }
 
-        imTmp = imImageCreate( (*image)->width / 2, (*image)->height /2, IM_BINARY, IM_BYTE );
-        if ( !imTmp )
-            return this->Terminate( ERR_MEMORY );
-
-        imProcessReduceBy4( *image , imTmp );
-        SwapImages( image, &imTmp );
+        cv::Mat imTmp(image.rows / 2, image.cols / 2, CV_8UC1);
+        {
+            ImView src_view(image, IM_BINARY);
+            ImView dst_view(imTmp, IM_BINARY);
+            imProcessReduceBy4( src_view, dst_view );
+        }
+        image = imTmp;
     }
 
     return true;
 }
 
 
-bool ImOperator::GetImage( _imImage **image, int factor,  int binary_method, bool median_filtering )
+bool ImOperator::GetImage( cv::Mat &image, int factor,  int binary_method, bool median_filtering )
 {
-    wxASSERT_MSG( !(*image), "Image pointer must be NULL");
-
-    imImage *imTmp;
-
     int color_type = IM_GRAY;
     if ( binary_method != -1 )
         color_type = IM_BINARY;
 
-    if ( m_opImMap == NULL )
+    if ( m_opImMap.empty() )
         return this->Terminate( ERR_UNKNOWN );
-    
-    ImageDestroy( image );
-    *image = imImageDuplicate( m_opImMap );
-    if ( !*image )
-        return this->Terminate( ERR_MEMORY );
+
+    ImageDestroy(image);
+    image = m_opImMap.clone();
 
     // binary
-    if ( (binary_method != -1) && !imColorModeMatch( (*image)->color_space, IM_BINARY ) )
+    if ( binary_method != -1 )
     {
-        imTmp = imImageCreate( (*image)->width, (*image)->height, IM_BINARY, IM_BYTE);
-        if ( !imTmp )
-            return this->Terminate( ERR_MEMORY );
-		if ( binary_method == IM_BINARIZATION_OTSU )
-			imProcessOtsuThreshold( *image, imTmp );
-		else if ( binary_method == IM_BINARIZATION_MINMAX )
-			imProcessMinMaxThreshold( *image, imTmp );
-		else if ( binary_method == IM_BINARIZATION_BRINK )
-			imProcessBrink2ClassesThreshold( *image, imTmp, false, BRINK_AND_PENDOCK );
-		else if ( binary_method == IM_BINARIZATION_BRINK3CLASSES )
-			imProcessBrink3ClassesThreshold( *image, imTmp, false, BRINK_AND_PENDOCK );
-		else // should not happen, but just in case
-		{	
-			wxLogWarning("Fix threshold used when resizing" );
-			imProcessThreshold( m_opImMain, m_opImTmp1, 127, 1);
-		}
-        SwapImages( image, &imTmp );
+        cv::Mat imTmp(image.rows, image.cols, CV_8UC1);
+        {
+            ImView src_view(image, IM_GRAY);
+            ImView dst_view(imTmp, IM_BINARY);
+            if ( binary_method == IM_BINARIZATION_OTSU )
+                imProcessOtsuThreshold( src_view, dst_view );
+            else if ( binary_method == IM_BINARIZATION_MINMAX )
+                imProcessMinMaxThreshold( src_view, dst_view );
+            else if ( binary_method == IM_BINARIZATION_BRINK )
+                imProcessBrink2ClassesThreshold( src_view, dst_view, false, BRINK_AND_PENDOCK );
+            else if ( binary_method == IM_BINARIZATION_BRINK3CLASSES )
+                imProcessBrink3ClassesThreshold( src_view, dst_view, false, BRINK_AND_PENDOCK );
+            else
+            {
+                wxLogWarning("Fix threshold used when resizing" );
+                imProcessThreshold( src_view, dst_view, 127, 1);
+            }
+        }
+        image = imTmp;
     }
-
 
     // resize
     for(int i = 1; i < factor; i*= 2 )
     {
-        int removeX = (*image)->width % 2;
-        int removeY = (*image)->height % 2;
-        if (removeX || removeY) // controler si width ou height sont impaires -> si oui, crop image
-        {
-            imTmp = imImageCreate( (*image)->width - removeX, (*image)->height - removeY,
-                (*image)->color_space, (*image)->data_type);
-            if ( !imTmp )
-                return this->Terminate( ERR_MEMORY );
-
-            imProcessCrop( *image, imTmp, 0, 0);
-            SwapImages( image, &imTmp );
+        int removeX = image.cols % 2;
+        int removeY = image.rows % 2;
+        if (removeX || removeY) {
+            image = image(cv::Rect(0, 0, image.cols - removeX, image.rows - removeY)).clone();
         }
 
-        imTmp = imImageCreate( (*image)->width / 2, (*image)->height /2, color_type, IM_BYTE );
-        if ( !imTmp )
-            return this->Terminate( ERR_MEMORY );
-
-        imProcessReduceBy4( *image , imTmp );
-        SwapImages( image, &imTmp );
+        cv::Mat imTmp(image.rows / 2, image.cols / 2, CV_8UC1);
+        {
+            ImView src_view(image, color_type);
+            ImView dst_view(imTmp, color_type);
+            imProcessReduceBy4( src_view, dst_view );
+        }
+        image = imTmp;
     }
 
     // median filtering
-    if ( median_filtering == true )
+    if ( median_filtering )
     {
-        imTmp = imImageClone( *image );
-        if ( !imTmp )
-            return this->Terminate( ERR_MEMORY );
-        if ( !imProcessMedianConvolve( *image ,imTmp, 3 ) )
-            return this->Terminate( ERR_CANCELED );
-        SwapImages( image, &imTmp );
+        cv::Mat imTmp = image.clone();
+        {
+            ImView src_view(image, color_type);
+            ImView dst_view(imTmp, color_type);
+            if ( !imProcessMedianConvolve( src_view, dst_view, 3 ) )
+                return this->Terminate( ERR_CANCELED );
+        }
+        image = imTmp;
     }
 
     return true;
 }
 
 
-void ImOperator::PruneElementsZone( _imImage *image, int min_threshold, int max_threshold, int type )
+void ImOperator::PruneElementsZone( cv::Mat &image, int min_threshold, int max_threshold, int type )
 {
-    // Wrap the imImage's byte plane as a cv::Mat view in place.
-    cv::Mat src(image->height, image->width, CV_8UC1, image->data[0]);
+    if (image.empty()) return;
 
-    // 4-connectivity labeling. connectedComponents' first return value
-    // includes label 0 (background), so the number of foreground
-    // regions is `num_labels - 1`.
     cv::Mat labels;
-    int num_labels = cv::connectedComponents(src, labels, /*connectivity=*/4, CV_16U);
+    int num_labels = cv::connectedComponents(image, labels, /*connectivity=*/4, CV_16U);
     int region_count = num_labels - 1;
     if (region_count <= 0)
         return;
@@ -430,130 +401,139 @@ void ImOperator::PruneElementsZone( _imImage *image, int min_threshold, int max_
     else /*    IM_PRUNE_CLEAR_MIN */        ax::clear_min   (labels, region_count, min_threshold);
 
     // Rewrite the byte plane: any surviving label -> 1, else 0.
-    for (int y = 0; y < src.rows; ++y) {
+    for (int y = 0; y < image.rows; ++y) {
         const uint16_t* r = labels.ptr<uint16_t>(y);
-        uchar*          d = src.ptr<uchar>(y);
-        for (int x = 0; x < src.cols; ++x)
+        uchar*          d = image.ptr<uchar>(y);
+        for (int x = 0; x < image.cols; ++x)
             d[x] = r[x] ? 1 : 0;
     }
 }
 
 
-void ImOperator::MoveElements( _imImage *src, _imImage *dest, int boxes[], int count, int margins[4], int factor )
+void ImOperator::MoveElements( cv::Mat &src, cv::Mat &dest, int boxes[], int count, int margins[4], int factor )
 {
-    int i;
-    for (i = 0; i < count * 4; i += 4)
+    int color_space = IM_BINARY;
+    for (int i = 0; i < count * 4; i += 4)
     {
         if ( (boxes[i+1] <= boxes[i+0]) || (boxes[i+3] <= boxes[i+2]) )
             continue;
 
         // bounding box
-        imImage *box = imImageCreate( 
-            (boxes[i+1] - boxes[i+0]) * factor, 
-            (boxes[i+3] - boxes[i+2]) * factor, 
-            src->color_space, src->data_type);
-        if (!box)
-            return;
-        imImageClear( box ); // zone blanche
-        imProcessBitwiseNot( box, box );
+        cv::Mat box(
+            (boxes[i+3] - boxes[i+2]) * factor,
+            (boxes[i+1] - boxes[i+0]) * factor,
+            CV_8UC1);
+        box.setTo(0); // imImageClear
+        {
+            ImView v(box, color_space);
+            imProcessBitwiseNot(v, v);
+        }
 
         int mx1 = max( factor * boxes[i+0] - margins[0] , 0 );
-        int mx2 = min( factor * boxes[i+1] + margins[1] , src->width - 1 );
+        int mx2 = min( factor * boxes[i+1] + margins[1] , src.cols - 1 );
         int my1 = max( factor * boxes[i+2] - margins[2] , 0 );
-        int my2 = min( factor * boxes[i+3] + margins[3] , src->height - 1  );
-        int mmx1 = factor * boxes[i+0] - mx1; 
+        int my2 = min( factor * boxes[i+3] + margins[3] , src.rows - 1  );
+        int mmx1 = factor * boxes[i+0] - mx1;
         int mmy1 = factor * boxes[i+2] - my1;
 
-        // bounding box avec marges d'effacements
-        imImage *box_m1 = imImageCreate( mx2 - mx1, my2 - my1, src->color_space, src->data_type);
-        if (!box_m1)
-        {   
-            imImageDestroy( box );
-            return;
+        cv::Mat box_m1(my2 - my1, mx2 - mx1, CV_8UC1);
+        {
+            ImView src_view(src, color_space);
+            ImView dst_view(box_m1, color_space);
+            imProcessCrop( src_view, dst_view, mx1, my1 );
         }
-        imProcessCrop( src, box_m1, mx1, my1); // copie de l'image d'origine
-        imSetData( box_m1, box, mmx1, mmy1 );  // zone blanche � l'interieure des marges
-
-        // box avec marges d'effacement + 1 pixels supplementaire de marge -> les zones ne doivent pas
-        // toucher le bord pour Prune
-        imImage *box_mm1 = imImageCreate( mx2 - mx1 + 2, my2 - my1 + 2, src->color_space, src->data_type);
-        if (!box_mm1)
-        {   
-            imImageDestroy( box );
-            imImageDestroy( box_m1 );
-            return;
+        {
+            ImView src_view(box, color_space);
+            ImView dst_view(box_m1, color_space);
+            imSetData( dst_view, src_view, mmx1, mmy1 );
         }
-        imProcessAddMargins( box_m1, box_mm1, 1, 1);
-        // effacement des pixels non connects -> zones plus petites que le box
-        // attention si les marges sont larges !! eventuellement verifier le centroide ?
-        imProcessRemoveByArea( box_mm1, box_mm1, 4, box->height * box->width , 0, 0 );
 
-        // suppression des marges d'un pixel supplementaire
-        imProcessCrop( box_mm1, box_m1, 1, 1);
-        // copie de la zone depuis l'image source vers la bounding box
-        imProcessCrop( src, box, mx1 + mmx1, my1 + mmy1 );
-        // copie de la bounding box vers la zone avec marges d'effacement
-        imSetData( box_m1, box, mmx1, mmy1 );
-        // copie dans l'image destination
-        imSetData( dest, box_m1, mx1, my1 );
-
-        // effacement dans l'image source
-        imImage *box_m2 = imImageCreate( mx2 - mx1, my2 - my1, src->color_space, src->data_type);
-        if (!box_m2)
-        {   
-            imImageDestroy( box );
-            imImageDestroy( box_m1 );
-            imImageDestroy( box_mm1 );
-            return;
+        cv::Mat box_mm1(my2 - my1 + 2, mx2 - mx1 + 2, CV_8UC1);
+        {
+            ImView src_view(box_m1, color_space);
+            ImView dst_view(box_mm1, color_space);
+            imProcessAddMargins( src_view, dst_view, 1, 1 );
         }
-        imProcessCrop( src, box_m2, mx1, my1);
-        imProcessBitwiseNot( box_m1, box_m1 );
-        imProcessBitwiseOp( box_m1, box_m2, box_m2, IM_BIT_AND );
-        imSetData( src, box_m2, mx1, my1 );
-        
-        imImageDestroy( box );
-        imImageDestroy( box_m1 );
-        imImageDestroy( box_m2 );
-        imImageDestroy( box_mm1 );
+        {
+            ImView v(box_mm1, color_space);
+            imProcessRemoveByArea( v, v, 4, box.rows * box.cols, 0, 0 );
+        }
+        {
+            ImView src_view(box_mm1, color_space);
+            ImView dst_view(box_m1, color_space);
+            imProcessCrop( src_view, dst_view, 1, 1 );
+        }
+        {
+            ImView src_view(src, color_space);
+            ImView dst_view(box, color_space);
+            imProcessCrop( src_view, dst_view, mx1 + mmx1, my1 + mmy1 );
+        }
+        {
+            ImView src_view(box, color_space);
+            ImView dst_view(box_m1, color_space);
+            imSetData( dst_view, src_view, mmx1, mmy1 );
+        }
+        {
+            ImView src_view(box_m1, color_space);
+            ImView dst_view(dest, color_space);
+            imSetData( dst_view, src_view, mx1, my1 );
+        }
+
+        cv::Mat box_m2(my2 - my1, mx2 - mx1, CV_8UC1);
+        {
+            ImView src_view(src, color_space);
+            ImView dst_view(box_m2, color_space);
+            imProcessCrop( src_view, dst_view, mx1, my1 );
+        }
+        {
+            ImView v(box_m1, color_space);
+            imProcessBitwiseNot( v, v );
+        }
+        {
+            ImView view_m1(box_m1, color_space);
+            ImView view_m2(box_m2, color_space);
+            imProcessBitwiseOp( view_m1, view_m2, view_m2, IM_BIT_AND );
+        }
+        {
+            ImView src_view(box_m2, color_space);
+            ImView dst_view(src, color_space);
+            imSetData( dst_view, src_view, mx1, my1 );
+        }
     }
 }
 
 
 // FFT don't works on binary images !!!!!!!
 
-void ImOperator::DistByCorrelation( _imImage *im1,  _imImage *im2,
+void ImOperator::DistByCorrelation( const cv::Mat &im1,  const cv::Mat &im2,
                                 imSize window, int *decalageX, int *decalageY, int *maxCorr)
 {
     wxASSERT_MSG(decalageX, wxT("decalageX cannot be NULL") );
     wxASSERT_MSG(decalageY, wxT("decalagY cannot be NULL") );
-    wxASSERT_MSG(im1, wxT("Image 1 cannot be NULL") );
-    wxASSERT_MSG(im2, wxT("Image 2 cannot be NULL") );
-    wxASSERT_MSG(im1->palette_count!=2, wxT("Image 1 cannot be binary") );
-    wxASSERT_MSG(im2->palette_count!=2, wxT("Image 2 cannot be binary") );
-  
+    wxASSERT_MSG(!im1.empty(), wxT("Image 1 cannot be NULL") );
+    wxASSERT_MSG(!im2.empty(), wxT("Image 2 cannot be NULL") );
+
     // this prevent imProccessCrop to crash when the image is too small
-    // it can happen when the correlation is too detailed
-    if ( (im2->width < 4) || (im2->height < 4) ) {
+    if ( (im2.cols < 4) || (im2.rows < 4) ) {
         return;
     }
-    
-    // this prevent imProccessCrop to crash when the window is too big
-    // it can happen when something is going wrong with the correlation
-    window.SetWidth( min( window.GetWidth(), im2->width / 2  - 1) );
-    window.SetHeight( min( window.GetHeight(), im2->height / 2 - 1) );
 
-    //imImage *im1 = GetImImage(&image1, IM_GRAY);
-    //imImage *im2 = GetImImage(&image2, IM_GRAY);
+    window.SetWidth( min( window.GetWidth(), im2.cols / 2  - 1) );
+    window.SetHeight( min( window.GetHeight(), im2.rows / 2 - 1) );
 
-    imImage *corr = imImageCreate( im1->width, im1->height, IM_GRAY, IM_CFLOAT);
-    imProcessCrossCorrelation( im1, im2, corr );
-    imImage *corrCrop = imImageCreate( window.GetWidth() * 2 + 1, window.GetHeight() * 2 + 1,
+    ImView view_im1(im1, IM_GRAY);
+    ImView view_im2(im2, IM_GRAY);
+
+    _imImage *corr = imImageCreate( im1.cols, im1.rows, IM_GRAY, IM_CFLOAT);
+    imProcessCrossCorrelation( view_im1, view_im2, corr );
+
+    _imImage *corrCrop = imImageCreate( window.GetWidth() * 2 + 1, window.GetHeight() * 2 + 1,
         IM_GRAY, IM_CFLOAT );
-    int xmin = im1->width / 2 - window.GetWidth();
-    int ymin = im1->height / 2 - window.GetHeight();
+    int xmin = im1.cols / 2 - window.GetWidth();
+    int ymin = im1.rows / 2 - window.GetHeight();
     imProcessCrop( corr, corrCrop, xmin, ymin );
 
-    imImage *corrReal = imImageCreate( corrCrop->width , corrCrop->height , corrCrop->color_space, IM_BYTE );
+    _imImage *corrReal = imImageCreate( corrCrop->width , corrCrop->height , corrCrop->color_space, IM_BYTE );
     imConvertDataType( corrCrop, corrReal, IM_CPX_MAG, IM_GAMMA_LINEAR, 0, IM_CAST_MINMAX);
 
     int width = corrReal->width;
@@ -570,7 +550,6 @@ void ImOperator::DistByCorrelation( _imImage *im1,  _imImage *im2,
                 max = buf[y * width + x];
                 maxX = x;
                 maxY = y;
-
             }
         }
     }
@@ -578,73 +557,13 @@ void ImOperator::DistByCorrelation( _imImage *im1,  _imImage *im2,
     *decalageX = maxX - window.GetWidth();
     *decalageY = maxY - window.GetHeight();
 
-    //int error;
-    //imFile* ifile = NULL;
-    //ifile = imFileNew("D:/Mes Images/corr1.tif", "TIFF", &error);
-    //imFileSaveImage(ifile,corrReal);
-    //imFileClose(ifile);
+    if (maxCorr) *maxCorr = max;
 
     imImageDestroy( corrReal );
     imImageDestroy( corrCrop );
     imImageDestroy( corr );
 }
 
-
-/// works on binary images 
-/*
-void ImOperator::DistByCorrelation( _imImage *im1, _imImage *im2,
-                                wxSize window, int *decalageX, int *decalageY, int *maxCorr)
-{
-    wxASSERT_MSG(decalageX, wxT("decalageX cannot be NULL") );
-    wxASSERT_MSG(decalageY, wxT("decalagY cannot be NULL") );
-    wxASSERT_MSG(maxCorr, wxT("maxCorr cannot be NULL") );
-    wxASSERT_MSG(im1, wxT("Image 1 cannot be NULL") );
-    wxASSERT_MSG(im2, wxT("Image 2 cannot be NULL") );
-	
-	//imProcessNegative( im1, im1 );
-	//imProcessNegative( im2, im2 );
-
-    // zero padding
-	imImage *imTmp1 = imImageCreate(
-            im1->width +  window.GetWidth() * 2,
-            im1->height +  window.GetHeight() * 2,
-            im1->color_space, im1->data_type);
-	imProcessAddMargins(im1 ,imTmp1, window.GetWidth(), window.GetHeight());
-
-    int conv_width = 2 * window.GetWidth();
-    int conv_height = 2 * window.GetHeight();
-    imImage *mask = imImageCreate(im2->width, im2->height,im2->color_space, im2->data_type);
-    imbyte *bufIm2 = (imbyte*)im2->data[0];
-    int maxSum = 0, maxX = 0, maxY = 0;
-    for (int y = 0; y < conv_height; y++)
-    {
-        for (int x = 0; x < conv_width; x++)
-        {
-            imProcessCrop(imTmp1,mask, x, y);
-            imbyte *bufMask = (imbyte*)mask->data[0]; 
-            int sum = 0;
-            for (int i = 0; i < mask->plane_size; i++)
-            {
-				sum += (bufIm2[i] / 255) * (bufMask[i] / 255);
-                //sum += (bufIm2[i]) * (bufMask[i]) / (255 * 255);
-            }
-            if (sum > maxSum)
-            {
-				//wxLogDebug("Sum %d", sum );
-                maxSum = sum;
-                maxX = x;
-                maxY = y;
-            }
-        }
-    }
-
-    *decalageX = maxX - window.GetWidth();
-    *decalageY = maxY - window.GetHeight();
-    *maxCorr = maxSum;
-    imImageDestroy(imTmp1);
-    imImageDestroy(mask);
-}
-*/
 
 void ImOperator::MedianFilter( int values[], int size, int filter_size, int *avg_ptr )
 {
@@ -659,8 +578,6 @@ void ImOperator::MedianFilter( int values[], int size, int filter_size, int *avg
         pos = ( i - half_size < 0 ) ? 0 : i - half_size;
         current_size = ( pos + filter_size > size - 1) ? size - pos : filter_size;
         int *win = new int[ current_size ];
-        //memset( win, 0, sizeof(int)*current_size );
-        //int win[10] = {1,2,3,4,5,6,7,8,9,0};
         memcpy( win, values + pos, sizeof(int)*current_size);
         tmp[i] = median( win, current_size );
         avg += tmp[i];
@@ -673,4 +590,3 @@ void ImOperator::MedianFilter( int values[], int size, int filter_size, int *avg
     if ( avg_ptr )
         *avg_ptr = avg;
 }
-

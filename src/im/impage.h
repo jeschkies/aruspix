@@ -118,16 +118,16 @@ public:
     
 private:
         int GetMedianStavesSpace( );
-    int GetDeskewAlignement( _imImage *image, double alpha );
+    int GetDeskewAlignement( const cv::Mat &image, double alpha );
     void GetHorizontalStavesPosition( int values[], int size, int avg, int *x1, int *x2 );
     void GetVerticalStavesPosition( int values[], int size, int avg, int staves[], int *nb_staves );
-    void CleanBorder( int row[], int size, _imImage *border, _imImage *image, int split );
+    void CleanBorder( int row[], int size, cv::Mat &border, cv::Mat &image, int split );
 
 
 public:
-    _imImage *m_img0; // processed image, with pre-classification
-	_imImage *m_img1; // processed image, greyscale (alternative)
-	_imImage *m_selection; // buffer used to change classification
+    cv::Mat m_img0; // processed image, with pre-classification
+	cv::Mat m_img1; // processed image, greyscale (alternative)
+	cv::Mat m_selection; // buffer used to change classification
 	imPoint m_selection_pos;
 	bool *m_isModified;
 	wxString m_path; // path of the RecFile
@@ -140,7 +140,7 @@ public:
     int m_original_width, m_original_height;
     int m_rotated_width, m_rotated_height;
     int m_x1, m_x2, m_y1;
-    imSize m_size; // taille de l'image à reconnaitre
+    imSize m_size; // taille de l'image ï¿½ reconnaitre
     int m_line_width;
     int m_space_width;
 	int m_staff_height; // taille de la portee (calculee par correlation dans StaffCurvatures())
