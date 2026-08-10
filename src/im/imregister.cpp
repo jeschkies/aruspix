@@ -777,11 +777,8 @@ bool ImRegister::SubRegister( imPoint origine, imSize window, imSize size, int l
 
     imSize subwindow = window;
 
-    {
-        ImView vim1(m_im1, IM_GRAY);
-        if (!imProcessSafeCrop(vim1, &size.x, &size.y, &origine.x, &origine.y))
-            return this->Terminate( ERR_UNKNOWN );
-    }
+    if (!ax::safe_crop(m_im1, &size.x, &size.y, &origine.x, &origine.y))
+        return this->Terminate( ERR_UNKNOWN );
 
     m_opImTmp1 = cv::Mat( size.GetHeight(), size.GetWidth(), CV_8UC1 );
     if ( m_opImTmp1.empty() )
@@ -833,11 +830,7 @@ bool ImRegister::SubRegister( imPoint origine, imSize window, imSize size, int l
             pos_y = 0; 
         }
         
-        bool safe_ok;
-        {
-            ImView vim2(m_im2, IM_GRAY);
-            safe_ok = imProcessSafeCrop( vim2, &width, &height, &pos_x, &pos_y );
-        }
+        bool safe_ok = ax::safe_crop( m_im2, &width, &height, &pos_x, &pos_y );
         if ( safe_ok )
         {
             m_opImMask = cv::Mat( height, width, CV_8UC1 );
@@ -880,11 +873,8 @@ bool ImRegister::SubRegister( imPoint origine, imSize window, imSize size, int l
     }
     
     // this method return the maximum values for croping
-    {
-        ImView vim2(m_im2, IM_GRAY);
-        if (!imProcessSafeCrop( vim2, &move_width, &move_height, &move_x, &move_y ) ) {
-            return this->Terminate( ERR_UNKNOWN );
-        }
+    if (!ax::safe_crop( m_im2, &move_width, &move_height, &move_x, &move_y ) ) {
+        return this->Terminate( ERR_UNKNOWN );
     }
     m_opImTmp1 = cv::Mat( move_height, move_width, CV_8UC1 );
 	if ( m_opImTmp1.empty() )

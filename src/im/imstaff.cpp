@@ -16,6 +16,7 @@ using std::max;
 #include "wx/tokenzr.h"
 #include "wx/wfstream.h"
 
+#include "analyze.h"
 #include "imstaff.h"
 #include "imstaffsegment.h"
 
@@ -658,8 +659,9 @@ bool ImStaff::GetStaffBorders( int threshold_in_percent, bool analyse_segments )
     int f_width, avg;
     m_opHist = new int[ m_opImTmp1.cols ];
     {
-        ImView v(m_opImTmp1, IM_BINARY);
-        imAnalyzeProjectionV( v, m_opHist );
+        std::vector<int> hist;
+        ax::projection_v( m_opImTmp1, hist );
+        std::copy(hist.begin(), hist.end(), m_opHist);
     }
     f_width = 30 / SS_FACTOR_1; // 30 px
     MedianFilter( m_opHist, m_opImTmp1.cols , f_width, &avg );
@@ -873,8 +875,9 @@ void ImStaff::CalcStaffHeight(const int staff, wxArrayPtrVoid params )
         m_opIm(cv::Rect(x, 0, m_opImTmp1.cols, m_opImTmp1.rows)).copyTo(m_opImTmp1);
 
         {
-            ImView v(m_opImTmp1, IM_BINARY);
-            imAnalyzeProjectionH( v, m_opHist );
+            std::vector<int> hist;
+            ax::projection_h( m_opImTmp1, hist );
+            std::copy(hist.begin(), hist.end(), m_opHist);
         }
 
 		// pic de l'histogramme :bottom - top = epaisseur de portee;
@@ -956,17 +959,15 @@ void ImStaff::CalcCorrelation(const int staff, wxArrayPtrVoid params )
             break;
         m_opIm(cv::Rect(x, 0, m_opImTmp1.cols, m_opImTmp1.rows)).copyTo(m_opImTmp1);
         {
-            ImView v(m_opImTmp1, IM_BINARY);
-            imAnalyzeProjectionH( v, m_opHist );
+            std::vector<int> hist;
+            ax::projection_h( m_opImTmp1, hist );
+            std::copy(hist.begin(), hist.end(), m_opHist);
         }
         corr(m_opHist, mask, STAFF_HEIGHT, CORRELATION_HEIGHT, &dec_y, &max );
 		//wxLogMessage("dec y = %d - max %d", dec_y , max);
 		positions_tosave.Add( dec_y );
 		//
-		{
-			ImView v(m_opImTmp1, IM_BINARY);
-			imAnalyzeRuns( v, &peak_val, &median_val, 1 );
-		}
+		ax::analyze_runs( m_opImTmp1, peak_val, median_val, 1 );
 		//wxLogMessage("peak_val = %d, median_val = %d", peak_val , median_val );
 		line_p_tosave.Add( peak_val );
 		line_m_tosave.Add( median_val );		

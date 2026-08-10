@@ -18,6 +18,8 @@ using std::max;
 
 #include "imoperator.h"
 #include "analyze.h"
+#include "image_ops.h"
+#include "thresholds.h"
 
 int ImOperator::s_pre_image_binarization_method = IM_BINARIZATION_OTSU;
 
@@ -334,23 +336,21 @@ bool ImOperator::GetImage( cv::Mat &image, int factor,  int binary_method, bool 
     // binary
     if ( binary_method != -1 )
     {
-        cv::Mat imTmp(image.rows, image.cols, CV_8UC1);
-        {
-            ImView src_view(image, IM_GRAY);
-            ImView dst_view(imTmp, IM_BINARY);
-            if ( binary_method == IM_BINARIZATION_OTSU )
-                imProcessOtsuThreshold( src_view, dst_view );
-            else if ( binary_method == IM_BINARIZATION_MINMAX )
-                imProcessMinMaxThreshold( src_view, dst_view );
-            else if ( binary_method == IM_BINARIZATION_BRINK )
-                imProcessBrink2ClassesThreshold( src_view, dst_view, false, BRINK_AND_PENDOCK );
-            else if ( binary_method == IM_BINARIZATION_BRINK3CLASSES )
-                imProcessBrink3ClassesThreshold( src_view, dst_view, false, BRINK_AND_PENDOCK );
-            else
-            {
-                wxLogWarning("Fix threshold used when resizing" );
-                imProcessThreshold( src_view, dst_view, 127, 1);
-            }
+        cv::Mat imTmp;
+        if ( binary_method == IM_BINARIZATION_OTSU ) {
+            cv::threshold(image, imTmp, 0, 1, cv::THRESH_BINARY | cv::THRESH_OTSU);
+        } else if ( binary_method == IM_BINARIZATION_MINMAX ) {
+            // imProcessMinMaxThreshold: T = (min + max) / 2
+            double mn, mx;
+            cv::minMaxLoc(image, &mn, &mx);
+            cv::threshold(image, imTmp, (mn + mx) / 2.0, 1, cv::THRESH_BINARY);
+        } else if ( binary_method == IM_BINARIZATION_BRINK ) {
+            ax::brink2_classes_threshold(image, imTmp, false, BRINK_AND_PENDOCK);
+        } else if ( binary_method == IM_BINARIZATION_BRINK3CLASSES ) {
+            ax::brink3_classes_threshold(image, imTmp, false, BRINK_AND_PENDOCK);
+        } else {
+            wxLogWarning("Fix threshold used when resizing" );
+            cv::threshold(image, imTmp, 127, 1, cv::THRESH_BINARY);
         }
         image = imTmp;
     }
@@ -440,10 +440,7 @@ void ImOperator::MoveElements( cv::Mat &src, cv::Mat &dest, int boxes[], int cou
 
         cv::Mat box_mm1;
         cv::copyMakeBorder(box_m1, box_mm1, 1, 1, 1, 1, cv::BORDER_CONSTANT, cv::Scalar(0));
-        {
-            ImView v(box_mm1, IM_BINARY);
-            imProcessRemoveByArea( v, v, 4, box.rows * box.cols, 0, 0 );
-        }
+        ax::remove_by_area( box_mm1, box_mm1, 4, box.rows * box.cols, 0 );
         box_m1 = box_mm1(cv::Rect(1, 1, box_m1.cols, box_m1.rows)).clone();
         src(cv::Rect(mx1 + mmx1, my1 + mmy1, box.cols, box.rows)).copyTo( box );
         box.copyTo( box_m1(cv::Rect(mmx1, mmy1, box.cols, box.rows)) );

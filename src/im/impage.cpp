@@ -16,6 +16,7 @@ using std::max;
 
 #include <opencv2/imgproc.hpp>
 
+#include "analyze.h"
 #include "binarize.h"
 #include "image_ops.h"
 #include "impage.h"
@@ -1035,8 +1036,9 @@ bool ImPage::FindStaves( int min, int max, bool normalize, bool crop )
     // projection verticale
     m_opHist = new int[ width ];
     {
-        ImView v(m_opIm, IM_GRAY);
-        imAnalyzeProjectionV( v, m_opHist );
+        std::vector<int> hist;
+        ax::projection_v( m_opIm, hist );
+        std::copy(hist.begin(), hist.end(), m_opHist);
     }
 
     //wxString staves_v = m_path + "staves_v.csv";
@@ -1060,8 +1062,9 @@ bool ImPage::FindStaves( int min, int max, bool normalize, bool crop )
     // projection horizontales
     m_opHist = new int[ height ];
     {
-        ImView v(m_opIm, IM_GRAY);
-        imAnalyzeProjectionH( v, m_opHist );
+        std::vector<int> hist;
+        ax::projection_h( m_opIm, hist );
+        std::copy(hist.begin(), hist.end(), m_opHist);
     }
 
     //wxString staves_h = m_path + "staves_h.csv";
@@ -1389,15 +1392,7 @@ bool ImPage::FindOrnateLetters( )
     SwapImages( m_opIm, m_opImTmp1 );
 
     // prune
-    m_opImTmp1 = m_opIm.clone();
-    if ( m_opImTmp1.empty() )
-        return this->Terminate( ERR_MEMORY );
-    {
-        ImView vs(m_opIm, IM_BINARY);
-        ImView vd(m_opImTmp1, IM_BINARY);
-        imProcessRemoveByArea( vs, vd, 4, (int)(pow( 100 / TIP_FACTOR_1, 2 )), 0, 0);
-    }
-    SwapImages( m_opIm, m_opImTmp1 );
+    ax::remove_by_area( m_opIm, m_opIm, 4, (int)(pow( 100 / TIP_FACTOR_1, 2 )), 0 );
 
     // close
     m_opImTmp1 = m_opIm.clone();
@@ -1830,8 +1825,9 @@ void ImPage::CleanBorder( int rows[], int size, cv::Mat &border, cv::Mat &image,
 
         m_opHist = new int[ tmp2b.cols ];
         {
-            ImView v(tmp2b, IM_BINARY);
-            imAnalyzeProjectionV( v, m_opHist );
+            std::vector<int> hist;
+            ax::projection_v( tmp2b, hist );
+            std::copy(hist.begin(), hist.end(), m_opHist);
         }
 
         int x_border;
