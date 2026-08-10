@@ -419,18 +419,7 @@ bool ImPage::Check( wxString infile, int max_size, int min_size, int index )
 
         int new_w = (int)(m_opImMain.cols  / m_optimization_resize_factor);
         int new_h = (int)(m_opImMain.rows  / m_optimization_resize_factor);
-        m_opImTmp1 = cv::Mat(new_h, new_w, CV_8UC1);
-
-        if ( m_opImTmp1.empty() )
-            return this->Terminate( ERR_MEMORY );
-
-        {
-            ImView vs(m_opImMain, IM_GRAY);
-            ImView vd(m_opImTmp1, IM_GRAY);
-            if ( !imProcessResize( vs, vd, 1) )
-                return this->Terminate( ERR_CANCELED );
-        }
-
+        cv::resize(m_opImMain, m_opImTmp1, cv::Size(new_w, new_h), 0, 0, cv::INTER_LINEAR);
         SwapImages( m_opImMain, m_opImTmp1 );
 
 
@@ -996,15 +985,7 @@ bool ImPage::FindStaves( int min, int max, bool normalize, bool crop )
         // resize
         int new_w = (int)(m_opImMap.cols * normalization_factor);
         int new_h = (int)(m_opImMap.rows * normalization_factor);
-        m_opImTmp1 = cv::Mat(new_h, new_w, CV_8UC1);
-        if ( m_opImTmp1.empty() )
-            return this->Terminate( ERR_MEMORY );
-
-        {
-            ImView vs(m_opImMap, IM_MAP, m_opImMapPalette.data(), 256);
-            ImView vd(m_opImTmp1, IM_MAP, m_opImMapPalette.data(), 256);
-            imProcessResize( vs, vd, 1 );
-        }
+        cv::resize(m_opImMap, m_opImTmp1, cv::Size(new_w, new_h), 0, 0, cv::INTER_LINEAR);
         SwapImages( m_opImMap, m_opImTmp1 );
 
 		this->m_resized = this->m_resize / this->m_optimization_resize_factor;
@@ -1015,15 +996,7 @@ bool ImPage::FindStaves( int min, int max, bool normalize, bool crop )
     {
         int new_w = (int)(m_opIm.cols / STAVES_CONV_REDUCTION * factor * normalization_factor);
         int new_h = (int)(m_opIm.rows / STAVES_CONV_REDUCTION  * factor * normalization_factor);
-        m_opImTmp1 = cv::Mat(new_h, new_w, CV_8UC1);
-    }
-    if ( m_opImTmp1.empty() )
-        return this->Terminate( ERR_MEMORY );
-
-    {
-        ImView vs(m_opIm, IM_GRAY);
-        ImView vd(m_opImTmp1, IM_GRAY);
-        imProcessResize( vs, vd, 0 );
+        cv::resize(m_opIm, m_opImTmp1, cv::Size(new_w, new_h), 0, 0, cv::INTER_NEAREST);
     }
     SwapImages( m_opIm, m_opImTmp1 );
 
@@ -1337,14 +1310,9 @@ bool ImPage::FindOrnateLetters( )
         return this->Terminate( ERR_MEMORY );
 
     // resize
-    m_opImTmp1 = cv::Mat(m_opIm.rows / TIP_FACTOR_1, m_opIm.cols / TIP_FACTOR_1, CV_8UC1);
-    if ( m_opImTmp1.empty() )
-        return this->Terminate( ERR_MEMORY );
-    {
-        ImView vs(m_opIm, IM_BINARY);
-        ImView vd(m_opImTmp1, IM_BINARY);
-        imProcessResize( vs, vd, 0 );
-    }
+    cv::resize(m_opIm, m_opImTmp1,
+               cv::Size(m_opIm.cols / TIP_FACTOR_1, m_opIm.rows / TIP_FACTOR_1),
+               0, 0, cv::INTER_NEAREST);
     SwapImages( m_opIm, m_opImTmp1 );
 
     // close

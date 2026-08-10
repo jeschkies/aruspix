@@ -308,12 +308,8 @@ bool ImOperator::GetImagePlane( cv::Mat &image , int plane, int factor )
             image = image(cv::Rect(0, 0, image.cols - removeX, image.rows - removeY)).clone();
         }
 
-        cv::Mat imTmp(image.rows / 2, image.cols / 2, CV_8UC1);
-        {
-            ImView src_view(image, IM_BINARY);
-            ImView dst_view(imTmp, IM_BINARY);
-            imProcessReduceBy4( src_view, dst_view );
-        }
+        cv::Mat imTmp;
+        cv::resize(image, imTmp, cv::Size(image.cols / 2, image.rows / 2), 0, 0, cv::INTER_AREA);
         image = imTmp;
     }
 
@@ -364,25 +360,16 @@ bool ImOperator::GetImage( cv::Mat &image, int factor,  int binary_method, bool 
             image = image(cv::Rect(0, 0, image.cols - removeX, image.rows - removeY)).clone();
         }
 
-        cv::Mat imTmp(image.rows / 2, image.cols / 2, CV_8UC1);
-        {
-            ImView src_view(image, color_type);
-            ImView dst_view(imTmp, color_type);
-            imProcessReduceBy4( src_view, dst_view );
-        }
+        cv::Mat imTmp;
+        cv::resize(image, imTmp, cv::Size(image.cols / 2, image.rows / 2), 0, 0, cv::INTER_AREA);
         image = imTmp;
     }
 
     // median filtering
     if ( median_filtering )
     {
-        cv::Mat imTmp = image.clone();
-        {
-            ImView src_view(image, color_type);
-            ImView dst_view(imTmp, color_type);
-            if ( !imProcessMedianConvolve( src_view, dst_view, 3 ) )
-                return this->Terminate( ERR_CANCELED );
-        }
+        cv::Mat imTmp;
+        cv::medianBlur(image, imTmp, 3);
         image = imTmp;
     }
 

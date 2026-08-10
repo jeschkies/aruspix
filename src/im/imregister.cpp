@@ -14,6 +14,8 @@ using std::max;
 
 #include "wx/file.h"
 
+#include <opencv2/imgproc.hpp>
+
 #include "image_ops.h"
 #include "imregister.h"
 #include "impage.h"
@@ -488,17 +490,7 @@ bool ImRegister::Register( imPoint *points1, imPoint *points2)
         if ( !m_progressDlg->SetOperation( _("Filtering image 1 ...") ))
             return this->Terminate( ERR_CANCELED );
 
-        m_opImTmp1 = cv::Mat(m_im1.rows, m_im1.cols, CV_8UC1);
-        if ( m_opImTmp1.empty() )
-            return this->Terminate( ERR_MEMORY );
-
-        {
-            ImView vs(m_im1, IM_GRAY);
-            ImView vd(m_opImTmp1, IM_GRAY);
-            if ( !imProcessMedianConvolve( vs, vd, 3 ) )
-                return this->Terminate( ERR_CANCELED );
-        }
-
+        cv::medianBlur(m_im1, m_opImTmp1, 3);
         SwapImages( m_im1, m_opImTmp1 );
 
     }
@@ -542,34 +534,22 @@ bool ImRegister::Register( imPoint *points1, imPoint *points2)
         if (!m_progressDlg->SetOperation( _("Filtering image 2 ...") ))
             return this->Terminate( ERR_CANCELED );
 
-        m_opImTmp1 = cv::Mat(m_im2.rows, m_im2.cols, CV_8UC1);
-        if ( m_opImTmp1.empty() )
-            return this->Terminate( ERR_MEMORY );
-
-        {
-            ImView vs(m_im2, IM_GRAY);
-            ImView vd(m_opImTmp1, IM_GRAY);
-            if ( !imProcessMedianConvolve( vs, vd, 3 ) )
-                return this->Terminate( ERR_CANCELED );
-        }
-
+        cv::medianBlur(m_im2, m_opImTmp1, 3);
         SwapImages( m_im2, m_opImTmp1 );
     }
     // resize
     if (!m_progressDlg->SetOperation( _("Resizing image 2 ...") ))
         return this->Terminate( ERR_CANCELED );
 
-    m_opImTmp1 = cv::Mat( (int)(m_im2.rows * vfactor2), (int)(m_im2.cols * hfactor2), CV_8UC1 );
-    if ( m_opImTmp1.empty() )
-        return this->Terminate( ERR_MEMORY );
-
     {
-        ImView vs(m_im2, IM_GRAY);
-        ImView vd(m_opImTmp1, IM_GRAY);
-        if ( !imProcessResize( vs, vd, SupEnv::s_interpolation ) )
-            return this->Terminate( ERR_CANCELED );
+        // IM's imProcessResize order arg: 0=nearest, 1=linear, 2=cubic.
+        int cv_interp = SupEnv::s_interpolation == 0 ? cv::INTER_NEAREST
+                      : SupEnv::s_interpolation == 1 ? cv::INTER_LINEAR
+                      :                                cv::INTER_CUBIC;
+        cv::resize(m_im2, m_opImTmp1,
+                   cv::Size((int)(m_im2.cols * hfactor2), (int)(m_im2.rows * vfactor2)),
+                   0, 0, cv_interp);
     }
-
     SwapImages( m_im2, m_opImTmp1 );
 
     m_reg_points2[0].x = (int)(m_reg_points2[0].x * hfactor2);

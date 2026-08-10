@@ -16,6 +16,8 @@ using std::max;
 #include "wx/tokenzr.h"
 #include "wx/wfstream.h"
 
+#include <opencv2/imgproc.hpp>
+
 #include "analyze.h"
 #include "imstaff.h"
 #include "imstaffsegment.h"
@@ -620,14 +622,9 @@ bool ImStaff::GetStaffBorders( int threshold_in_percent, bool analyse_segments )
     if ( !GetImagePlane( m_opIm ) )
         return false;
 
-    m_opImTmp1 = cv::Mat( m_opIm.rows / SS_FACTOR_1, m_opIm.cols / SS_FACTOR_1, CV_8UC1 );
-    if ( m_opImTmp1.empty() )
-            return this->Terminate( ERR_MEMORY );
-    {
-        ImView src_view(m_opIm, IM_BINARY);
-        ImView dst_view(m_opImTmp1, IM_BINARY);
-        imProcessResize( src_view, dst_view, 0 );
-    }
+    cv::resize(m_opIm, m_opImTmp1,
+               cv::Size(m_opIm.cols / SS_FACTOR_1, m_opIm.rows / SS_FACTOR_1),
+               0, 0, cv::INTER_NEAREST);
     SwapImages( m_opIm, m_opImTmp1 );
 
     // convovle
