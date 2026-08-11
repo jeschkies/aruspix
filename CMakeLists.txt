@@ -180,13 +180,16 @@ elseif(WIN32)
     # rpcrt4 provides UuidCreate.
     target_link_libraries(aruspix PRIVATE rpcrt4)
 
-    # Copy every runtime DLL the aruspix target depends on into the
-    # output directory so the exe can find them at launch without
-    # needing PATH tweaks.
+    # Copy any runtime DLLs into the output directory so the exe can
+    # find them at launch without needing PATH tweaks. When the DLL
+    # list is empty (Conan's all-static build), cmake -E
+    # copy_if_different fails on a destination-only invocation — dispatch
+    # via a small script so we can no-op cleanly in that case.
     add_custom_command(TARGET aruspix POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_RUNTIME_DLLS:aruspix> $<TARGET_FILE_DIR:aruspix>
-        COMMAND_EXPAND_LISTS
+        COMMAND ${CMAKE_COMMAND}
+                "-DDLLS=$<TARGET_RUNTIME_DLLS:aruspix>"
+                "-DDEST=$<TARGET_FILE_DIR:aruspix>"
+                -P "${CMAKE_SOURCE_DIR}/cmake/copy_runtime_dlls.cmake"
     )
 endif()
 
