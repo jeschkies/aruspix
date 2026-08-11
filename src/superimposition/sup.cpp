@@ -537,8 +537,6 @@ void SupEnv::OnBookSuperimpose( wxCommandEvent &event )
             failed_once = true;
     }
 
-    imCounterEnd( dlg->GetCounter() );
-
     dlg->AxShowModal( failed_once  ); // stop process  ( failed ???? )
     dlg->Destroy();
     
@@ -723,8 +721,6 @@ void SupEnv::OnRun( wxCommandEvent &event )
     bool failed = false;
     
     failed = !m_supFilePtr->Superimpose( params, dlg );
-
-    imCounterEnd( dlg->GetCounter() );
 
     dlg->AxShowModal( ( failed || m_supFilePtr->GetError() != ERR_NONE ) ); // stop process
     dlg->Destroy();

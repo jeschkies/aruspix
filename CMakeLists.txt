@@ -5,9 +5,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Dependencies are provided by Conan; see conanfile.py + recipes/im/.
+# Dependencies are provided by Conan; see conanfile.py.
 # Configure with `cmake --preset conan-release` after `conan install`.
-find_package(im REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(wxWidgets REQUIRED)
 find_package(LibXml2 REQUIRED)
@@ -168,7 +167,6 @@ else()
 endif()
 
 target_link_libraries(aruspix PRIVATE
-    im::im
     opencv::opencv
     wxWidgets::wxWidgets
     LibXml2::LibXml2
@@ -181,20 +179,10 @@ elseif(APPLE)
 elseif(WIN32)
     # rpcrt4 provides UuidCreate.
     target_link_libraries(aruspix PRIVATE rpcrt4)
-    # IM's upstream prebuilt im.lib statically embeds libtiff (and
-    # libpng/libjpeg/zlib) — those symbols then collide with the
-    # tiff/png/jpeg/zlib that wxWidgets pulls in transitively from
-    # Conan. /FORCE:MULTIPLE lets the linker pick the first definition;
-    # /IGNORE:4006 silences the resulting warning. The duplicates are
-    # the same upstream code (libtiff 4.x etc.) so binding to either
-    # copy is safe.
-    target_link_options(aruspix PRIVATE /FORCE:MULTIPLE /IGNORE:4006 /IGNORE:4088)
 
-    # fftw is built as a DLL on Windows (see conanfile.py) so IM's
-    # im_fftw3.lib imports resolve. Copy every runtime DLL the aruspix
-    # target depends on (fftw3f.dll, and anything else Conan exposes as
-    # SHARED) into the output directory so the exe can find them at
-    # launch without needing PATH tweaks.
+    # Copy every runtime DLL the aruspix target depends on into the
+    # output directory so the exe can find them at launch without
+    # needing PATH tweaks.
     add_custom_command(TARGET aruspix POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 $<TARGET_RUNTIME_DLLS:aruspix> $<TARGET_FILE_DIR:aruspix>
@@ -206,8 +194,7 @@ endif()
 # Tests
 #
 # A separate target that exercises the wx-free leaf functions in src/im/
-# (imext.cpp, imbrink.cpp, imbrink3classes.cpp). These pin down current
-# IM behavior so we can swap IM for OpenCV without regressions.
+# (imext.cpp, imbrink.cpp, imbrink3classes.cpp) via their ax:: interfaces.
 # The wx-coupled wrapper classes (ImPage, ImStaff, ImRegister, ImOperator)
 # are intentionally not covered here — they need real-image fixtures and
 # belong in an integration-test target.
@@ -222,8 +209,6 @@ add_executable(aruspix_tests
 
     tests/test_main.cpp
     tests/test_imext_helpers.cpp
-    tests/test_imext_image.cpp
-    tests/test_imext_threshold.cpp
     tests/test_binarize.cpp
     tests/test_binarize_goldens.cpp
     tests/test_image_ops.cpp
@@ -238,15 +223,9 @@ target_compile_definitions(aruspix_tests PRIVATE
 )
 
 target_link_libraries(aruspix_tests PRIVATE
-    im::im
     opencv::opencv
     doctest::doctest
 )
-
-if(WIN32)
-    # Same libtiff/libpng duplicate-symbol issue as the main exe.
-    target_link_options(aruspix_tests PRIVATE /FORCE:MULTIPLE /IGNORE:4006 /IGNORE:4088)
-endif()
 
 add_test(NAME aruspix_tests COMMAND aruspix_tests)
 
@@ -267,9 +246,5 @@ add_executable(dump_binarize
 )
 target_include_directories(dump_binarize PRIVATE src)
 target_link_libraries(dump_binarize PRIVATE
-    im::im
     opencv::opencv
 )
-if(WIN32)
-    target_link_options(dump_binarize PRIVATE /FORCE:MULTIPLE /IGNORE:4006 /IGNORE:4088)
-endif()

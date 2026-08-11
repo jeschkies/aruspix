@@ -2,7 +2,7 @@
 *
 *   Created by Tristan Matthews, 2007.
 *   Based on "entropy_brink.m" and "binar_ashley.m" by
-*   John Ashley Burgoyne & Greg Eustace, McGill University  
+*   John Ashley Burgoyne & Greg Eustace, McGill University
 *
 *   Usage:
 *    Topt => Optimal threshold
@@ -14,63 +14,43 @@
 *    G = 255;                    % maximum grayscale value
 *
 *   References: Brink, A., and Pendock, N. 1996. Minimum cross-entropy
-*   threshold selection. Pattern Recognition 29: 179-188. 
+*   threshold selection. Pattern Recognition 29: 179-188.
 *
 */
 
-#include "imext.h"
 #include "thresholds.h"
 
-#include <stdlib.h>
-#include <math.h>
-#include <memory.h>
-
-// IMLIB
-#include <im.h>
-#include <im_image.h>
-#include <im_process_ana.h>
-#include <im_process_pnt.h>
+#include <cstdlib>
+#include <cstring>
+#include <cmath>
 
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 
-namespace {
-inline cv::Mat as_mat_8u(const _imImage *image) {
-    return cv::Mat(image->height, image->width, CV_8UC1,
-                   const_cast<void *>(image->data[0]));
-}
-inline cv::Mat as_mat_8u(_imImage *image) {
-    return cv::Mat(image->height, image->width, CV_8UC1, image->data[0]);
-}
-}  // namespace
-
 // define some global constants
 
 static unsigned short const MAX_GRAY = 256; // always used as a size variable, hence 255+1
-//static unsigned short const true = 1;
-//static unsigned short const false = 0;
-static unsigned short const NON_CUMULATIVE = 0;
 static const size_t VEC_DBL_SZ = sizeof(double) * MAX_GRAY;
 
 // returns sum of a vector of unsigned longs
-unsigned long vecSum(unsigned long *vec, const int vecSize)
+static unsigned long vecSum(unsigned long *vec, const int vecSize)
 {
 	if (vecSize < 1)
 		exit(EXIT_FAILURE);
 
-	int i; 
+	int i;
 	unsigned long result = 0;
 
 	for (i = 0; i < vecSize; ++i)
 		result += vec[i];
-	
+
 	return result;
 }
 
-int calcTopt(double m_f[MAX_GRAY], double m_b[MAX_GRAY], double vec[MAX_GRAY])
+static int calcTopt(double m_f[MAX_GRAY], double m_b[MAX_GRAY], double vec[MAX_GRAY])
 {
-	int i; 
-	double locMin;
+	int i;
+	double locMin = 0;
 	int isMinInit = false;
 	int Topt = 0;
 
@@ -86,12 +66,12 @@ int calcTopt(double m_f[MAX_GRAY], double m_b[MAX_GRAY], double vec[MAX_GRAY])
 			}
 		}
 	}
-		
+
 	return Topt + 1;	// DO I NEED TO ADD ONE
 }
 
 // computes the diagonal of the cumulative sum of an array Mat, stores result in diag
-void diagCumSum(double diag[MAX_GRAY], const double mat[MAX_GRAY][MAX_GRAY])
+static void diagCumSum(double diag[MAX_GRAY], const double mat[MAX_GRAY][MAX_GRAY])
 {
 	int i, j;
 	double tmp[MAX_GRAY][MAX_GRAY];
@@ -107,21 +87,21 @@ void diagCumSum(double diag[MAX_GRAY], const double mat[MAX_GRAY][MAX_GRAY])
 }
 
 
-void sumMinusDiagCumSum(double resultVec[MAX_GRAY], const double mat[MAX_GRAY][MAX_GRAY])
+static void sumMinusDiagCumSum(double resultVec[MAX_GRAY], const double mat[MAX_GRAY][MAX_GRAY])
 {
-	// based on: tmpb5 = sum(tmpb4, 1).' - diag(cumsum(tmpb4, 1));   % sum columns, subtract diagonal of cumsum of tmp4 
+	// based on: tmpb5 = sum(tmpb4, 1).' - diag(cumsum(tmpb4, 1));   % sum columns, subtract diagonal of cumsum of tmp4
 	int i, j;
 	double tmp[MAX_GRAY];
 
-	memcpy(resultVec, mat[0], sizeof(double) * MAX_GRAY);	// copy first row in	
+	memcpy(resultVec, mat[0], sizeof(double) * MAX_GRAY);	// copy first row in
 
-	for (i = 1; i < MAX_GRAY; ++i)		
+	for (i = 1; i < MAX_GRAY; ++i)
 		for (j = 0; j < MAX_GRAY; ++j)
 			resultVec[j] += mat[i][j];	// sums of columns of mat
 
-	diagCumSum(tmp, mat);		
+	diagCumSum(tmp, mat);
 
-	for (i = 0; i < MAX_GRAY; ++i)		
+	for (i = 0; i < MAX_GRAY; ++i)
 		resultVec[i] -= tmp[i];
 }
 
@@ -168,13 +148,13 @@ int brink_threshold(const cv::Mat& src_in, cv::Mat& dst, bool white_is_255)
 
 
 	m_f[0] = 0.0;
-	for (i = 1; i < MAX_GRAY; ++i)			// m_f = cumsum(g .* p).'; 
+	for (i = 1; i < MAX_GRAY; ++i)			// m_f = cumsum(g .* p).';
 		m_f[i] = i * p[i] + m_f[i - 1];
 
-	memcpy(m_b, m_f, VEC_DBL_SZ);		// m_b = m_f(end) - m_f; 
+	memcpy(m_b, m_f, VEC_DBL_SZ);		// m_b = m_f(end) - m_f;
 
 	for (i = 0; i < MAX_GRAY; ++i)
-		m_b[i] = m_f[MAX_GRAY - 1] - m_b[i];		
+		m_b[i] = m_f[MAX_GRAY - 1] - m_b[i];
 
 	/****************** END OF BINAR_ASHLEY PORTION, START OF ENTROPY_BRINK********************************/
 
@@ -184,7 +164,7 @@ int brink_threshold(const cv::Mat& src_in, cv::Mat& dst, bool white_is_255)
 		{
 			tmp0[i][j] = m_f[j] / i;
 
-			if ((m_f[j] == 0) || (i == 0)) 
+			if ((m_f[j] == 0) || (i == 0))
 			{
 				tmp1[i][j] = 0.0;				// replace inf or NaN values with 0
 				tmp3[i][j] = 0.0;
@@ -201,13 +181,13 @@ int brink_threshold(const cv::Mat& src_in, cv::Mat& dst, bool white_is_255)
 	diagCumSum(tmpVec1, tmp4);	// tmpVec is now the diagonal of the cumulative sum of tmp4
 
 	// same operation but for background moment, NOTE: tmp1 through tmp4 get overwritten
-	for (i = 0; i < MAX_GRAY; ++i)		
+	for (i = 0; i < MAX_GRAY; ++i)
 	{
 		for (j = 0; j < MAX_GRAY; ++j)
 		{
 			tmp0[i][j] = m_b[j] / i;	// tmpb0 = m_b_rep ./ g_rep;
 
-			if ((m_b[j] == 0) || (i == 0)) 
+			if ((m_b[j] == 0) || (i == 0))
 			{
 				tmp1[i][j] = 0.0;				// replace inf or NaN values with 0
 				tmp3[i][j] = 0.0;
@@ -221,7 +201,7 @@ int brink_threshold(const cv::Mat& src_in, cv::Mat& dst, bool white_is_255)
 		}
 	}
 
-	sumMinusDiagCumSum(tmpVec2, tmp4);		// sum columns, subtract diagonal of cumsum of tmp4 
+	sumMinusDiagCumSum(tmpVec2, tmp4);		// sum columns, subtract diagonal of cumsum of tmp4
 
 	for (i = 0; i < MAX_GRAY; ++i)
 		tmpVec1[i] += tmpVec2[i];
@@ -238,9 +218,3 @@ int brink_threshold(const cv::Mat& src_in, cv::Mat& dst, bool white_is_255)
 }
 
 }  // namespace ax
-
-int imProcessBrinkThreshold(const imImage* image, imImage* dest, bool white_is_255)
-{
-	cv::Mat dst = as_mat_8u(dest);
-	return ax::brink_threshold(as_mat_8u(image), dst, white_is_255);
-}

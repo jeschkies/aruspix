@@ -692,14 +692,13 @@ bool ImRegister::Register( imPoint *points1, imPoint *points2)
     
     if (!m_progressDlg->SetOperation( _("Image registration ..." ) ) )
        return this->Terminate( ERR_CANCELED );
-    
-	m_counter = imCounterBegin("Image registration");
-	imCounterTotal(m_counter, m_sub_register_total, "Image registration");
-    
+
+    m_counter = -1;
+
     if ( !SubRegister( origine, window, imSize( width, height ), 0, 1, 1 ) )
             return this->Terminate( ERR_CANCELED );
-    
-    imCounterEnd( m_counter );
+
+
     m_opImAlign(cv::Rect(window.GetWidth(), window.GetHeight(), m_im2.cols, m_im2.rows)).copyTo(m_im2);
     ImageDestroy( m_opImAlign );
 
@@ -754,9 +753,6 @@ bool ImRegister::SubRegister( imPoint origine, imSize window, imSize size, int l
     m_progressDlg->SuspendCounter();
     DistByCorrelation( m_opImTmp1, m_opImTmp2, window, &x, &y, &maxCorr );
     m_progressDlg->ReactiveCounter();
-
-    if (!imCounterInc(m_counter))
-        return false;
 
     ImageDestroy( m_opImTmp1 );
     ImageDestroy( m_opImTmp2 );
