@@ -584,18 +584,8 @@ bool ImRegister::Register( imPoint *points1, imPoint *points2)
     m_reg_points1[1] = CalcPositionAfterRotation( m_reg_points1[1], alpha1, m_im1.cols, m_im1.rows, new_w, new_h);
     m_reg_points1[2] = CalcPositionAfterRotation( m_reg_points1[2], alpha1, m_im1.cols, m_im1.rows, new_w, new_h);
 
-    m_opImTmp1 = cv::Mat(new_h, new_w, CV_8UC1);
-    if ( m_opImTmp1.empty() )
-        return this->Terminate( ERR_MEMORY );
-
-    {
-        ImView vs(m_im1, IM_GRAY);
-        ImView vd(m_opImTmp1, IM_GRAY);
-        imImageCopyAttributes( vs, vd );
-        if ( !imProcessRotate( vs, vd, cos0, sin0, SupEnv::s_interpolation ) )
-            return this->Terminate( ERR_CANCELED );
-    }
-
+    ax::rotate_center( m_im1, m_opImTmp1, new_w, new_h, cos0, sin0,
+                       SupEnv::s_interpolation );
     SwapImages( m_im1, m_opImTmp1 );
 
 
@@ -616,18 +606,8 @@ bool ImRegister::Register( imPoint *points1, imPoint *points2)
     m_reg_points2[1] = CalcPositionAfterRotation( m_reg_points2[1], alpha2, m_im2.cols, m_im2.rows, new_w, new_h);
     m_reg_points2[2] = CalcPositionAfterRotation( m_reg_points2[2], alpha2, m_im2.cols, m_im2.rows, new_w, new_h);
 
-    m_opImTmp1 = cv::Mat( new_h, new_w, CV_8UC1 );
-    if ( m_opImTmp1.empty() )
-        return this->Terminate( ERR_MEMORY );
-
-    {
-        ImView vs(m_im2, IM_GRAY);
-        ImView vd(m_opImTmp1, IM_GRAY);
-        imImageCopyAttributes( vs, vd );
-        if ( !imProcessRotate( vs, vd, cos0, sin0, SupEnv::s_interpolation ) )
-            return this->Terminate( ERR_CANCELED );
-    }
-
+    ax::rotate_center( m_im2, m_opImTmp1, new_w, new_h, cos0, sin0,
+                       SupEnv::s_interpolation );
     SwapImages( m_im2, m_opImTmp1 );
 
     // deplacer (crop ou marges)

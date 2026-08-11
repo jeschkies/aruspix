@@ -42,6 +42,24 @@ void remove_by_area(const cv::Mat& src, cv::Mat& dst, int connectivity,
 void calc_rotate_size(int width, int height, int *new_width, int *new_height,
                       double cos0, double sin0);
 
+// Fill background holes fully enclosed by foreground. Preserves IM's
+// imProcessFillHoles semantics for binary 0/1 buffers: for each pixel
+// that isn't connected (via `connectivity`) to the image border via
+// background pixels, set the pixel to foreground (1). Foreground
+// pixels are left untouched.
+void fill_holes(const cv::Mat& src, cv::Mat& dst, int connectivity);
+
+// Rotate `src` by the angle whose (cos, sin) are `cos0` / `sin0`
+// around the source image centre, into an output of size (new_w, new_h)
+// centred on the destination. Matches IM's imProcessRotate convention:
+// forward rotation matrix M_IM = [cos sin; -sin cos] (clockwise by θ);
+// same convention used by cv::getRotationMatrix2D with a positive
+// angle, so we translate degrees straight through.
+// `order` is IM's interpolation order: 0=nearest, 1=linear (default).
+void rotate_center(const cv::Mat& src, cv::Mat& dst,
+                   int new_w, int new_h,
+                   double cos0, double sin0, int order);
+
 // Extract bit `plane` (0..7) from each byte in `src` into `dst`.
 // `dst`[i] = (src[i] >> plane) & 1.  Matches imProcessBitPlane's
 // non-reset (reset=0) behaviour on IM_MAP-encoded bitmasks.

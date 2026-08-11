@@ -210,6 +210,49 @@ void bit_plane_reset(cv::Mat& image, int plane)
 	cv::bitwise_and(image, cv::Scalar((uchar)~(1 << plane)), image);
 }
 
+void fill_holes(const cv::Mat& src, cv::Mat& dst, int connectivity)
+{
+	// Add a 1-pixel border of 0 (background) so cv::floodFill from a corner
+	// always starts on a background pixel that transitively touches the
+	// entire outer boundary. Fill the reachable background with a marker
+	// value (2), then any remaining 0's are enclosed holes: promote them
+	// to foreground.
+	cv::Mat padded;
+	cv::copyMakeBorder(src, padded, 1, 1, 1, 1,
+	                   cv::BORDER_CONSTANT, cv::Scalar(0));
+	cv::floodFill(padded, cv::Point(0, 0), cv::Scalar(2),
+	              nullptr, cv::Scalar(), cv::Scalar(), connectivity);
+
+	dst.create(src.rows, src.cols, CV_8UC1);
+	for (int y = 0; y < src.rows; ++y) {
+		const uchar* s = padded.ptr<uchar>(y + 1) + 1;
+		uchar* d = dst.ptr<uchar>(y);
+		for (int x = 0; x < src.cols; ++x)
+			d[x] = (s[x] == 2) ? 0 : 1;
+	}
+}
+
+void rotate_center(const cv::Mat& src, cv::Mat& dst,
+                   int new_w, int new_h,
+                   double cos0, double sin0, int order)
+{
+	// IM's imProcessRotate rotates around the source image centre and
+	// places the rotated content centred in an output of size (new_w, new_h).
+	// cv::getRotationMatrix2D produces the same M_IM = [cos sin; -sin cos]
+	// convention as an inverse (dst -> src) map, which is exactly what
+	// cv::warpAffine expects by default.
+	const double angle_deg = std::atan2(sin0, cos0) * 180.0 / M_PI;
+	cv::Point2f center(src.cols / 2.0f, src.rows / 2.0f);
+	cv::Mat M = cv::getRotationMatrix2D(center, angle_deg, 1.0);
+	M.at<double>(0, 2) += (new_w - src.cols) / 2.0;
+	M.at<double>(1, 2) += (new_h - src.rows) / 2.0;
+	const int interp = (order <= 0) ? cv::INTER_NEAREST
+	                 : (order == 1) ? cv::INTER_LINEAR
+	                 :                cv::INTER_CUBIC;
+	cv::warpAffine(src, dst, M, cv::Size(new_w, new_h),
+	               interp, cv::BORDER_CONSTANT, cv::Scalar(0));
+}
+
 void calc_rotate_size(int width, int height, int *new_width, int *new_height,
                       double cos0, double sin0)
 {

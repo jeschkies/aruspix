@@ -464,12 +464,7 @@ bool ImPage::Check( wxString infile, int max_size, int min_size, int index )
     // we have a Photometric tag
     if ( attrib_count == 1 )
     {
-        imStats istats;
-        {
-            ImView vm(m_opImMain, IM_GRAY);
-            imCalcImageStatistics( vm, &istats );
-        }
-        wxLogDebug("RBG image mean %f", istats.mean );
+        wxLogDebug("RBG image mean %f", cv::mean(m_opImMain)[0] );
         wxLogDebug("Photometric %hd", (attrib_data) );
 		if ( (attrib_data) != (short)PHOTOMETRIC_RGB )
         {
@@ -483,12 +478,7 @@ bool ImPage::Check( wxString infile, int max_size, int min_size, int index )
 	}
 
     if ( isRgb ) {
-        imStats istats;
-        {
-            ImView vm(m_opImMain, IM_GRAY);
-            imCalcImageStatistics( vm, &istats );
-        }
-        wxLogDebug("RBG image mean %f", istats.mean );
+        wxLogDebug("RBG image mean %f", cv::mean(m_opImMain)[0] );
         bool invert = true;
         //if ( AxImage::s_checkIfNegative )
         //    invert = (istats.mean > 127) ? true : false;
@@ -542,24 +532,14 @@ bool ImPage::Deskew( double max_alpha )
     if ( !GetImage( m_opIm, DESKEW_FACTOR ) )
         return false;
 
-    imStats istats;
+    // binary images - forcer la lecture en niveau de gris. post-Read there
+    // is no palette metadata; rely on max intensity to detect 0/1 buffers.
+    double stats_max;
+    cv::minMaxLoc(m_opIm, nullptr, &stats_max);
+    if ( stats_max == 1 )
     {
-        ImView v(m_opIm, IM_GRAY);
-        imCalcImageStatistics( v, &istats );
-    }
-    // binary images - forcer la lecture en niveau de gris -> verifier la palette
-    //if ( imColorModeMatch( file_color_mode, IM_BINARY ) )
-    // palette_count check dropped: post-Read there is no palette metadata; rely on istats.max only.
-    if ( istats.max == 1 )
-    {
-        m_opImTmp1 = cv::Mat(m_opIm.rows, m_opIm.cols, CV_8UC1);
-        if ( m_opImTmp1.empty() )
-            return this->Terminate( ERR_MEMORY );
-        {
-            ImView vs(m_opIm, IM_BINARY);
-            ImView vd(m_opImTmp1, IM_GRAY);
-            imConvertColorSpace( vs, vd );
-        }
+        // BINARY -> GRAY: {0,1} -> {0,255}.
+        cv::multiply(m_opIm, cv::Scalar(255), m_opImTmp1);
         SwapImages( m_opIm, m_opImTmp1 );
     }
 
@@ -648,17 +628,8 @@ bool ImPage::Deskew( double max_alpha )
         //new_w = m_opImMap.cols;
         //new_h = m_opImMap.rows;
 
-        m_opImTmp1 = cv::Mat(new_h, new_w, CV_8UC1);
-        if ( m_opImTmp1.empty() )
-            return this->Terminate( ERR_MEMORY );
-
-        {
-            ImView vs(m_opImMap, IM_MAP, m_opImMapPalette.data(), 256);
-            ImView vd(m_opImTmp1, IM_MAP, m_opImMapPalette.data(), 256);
-            if ( !imProcessRotate( vs, vd, cos0, sin0, 1 ) )
-                return this->Terminate( ERR_CANCELED );
-        }
-
+        // IM's imProcessRotate on IM_MAP forces order=0 (nearest); preserve that.
+        ax::rotate_center( m_opImMap, m_opImTmp1, new_w, new_h, cos0, sin0, 0 );
         SwapImages( m_opImMap, m_opImTmp1 );
 
         this->m_skew = skew;
@@ -1313,14 +1284,7 @@ bool ImPage::FindOrnateLetters( )
     SwapImages( m_opIm, m_opImTmp1 );
 
     // fill holes
-    m_opImTmp1 = m_opIm.clone();
-    if ( m_opImTmp1.empty() )
-        return this->Terminate( ERR_MEMORY );
-    {
-        ImView vs(m_opIm, IM_BINARY);
-        ImView vd(m_opImTmp1, IM_BINARY);
-        imProcessFillHoles( vs, vd, 4);
-    }
+    ax::fill_holes( m_opIm, m_opImTmp1, 4 );
     SwapImages( m_opIm, m_opImTmp1 );
 
     // open
@@ -1703,16 +1667,8 @@ void ImPage::CleanBorder( int rows[], int size, cv::Mat &border, cv::Mat &image,
     cv::dilate(border, tmp,
                cv::getStructuringElement(cv::MORPH_RECT, cv::Size(1, 5)));
 
-    cv::Mat tmp2 = tmp.clone();
-    if ( tmp2.empty() )
-    {
-        return;
-    }
-    {
-        ImView vs(tmp, IM_BINARY);
-        ImView vd(tmp2, IM_BINARY);
-        imProcessFillHoles( vs, vd, 4 ); // bug with inplace call !!!!!
-    }
+    cv::Mat tmp2;
+    ax::fill_holes( tmp, tmp2, 4 );
     SwapImages( tmp, tmp2 );
 
     // histogramme vertical sur 100 px
