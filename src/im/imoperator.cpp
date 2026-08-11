@@ -14,6 +14,7 @@ using std::max;
 
 #include <cstring>
 #include <opencv2/core.hpp>
+#include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
 #include "imoperator.h"
@@ -40,7 +41,6 @@ ImOperator::ImOperator( )
     m_opCols1 = NULL;
 
 	m_pre_image_binarization_methodPtr = &ImOperator::s_pre_image_binarization_method;
-    m_opImMapPalette.fill(0);
 }
 
 ImOperator::~ImOperator()
@@ -120,54 +120,29 @@ void ImOperator::SetMapImage( const cv::Mat &image )
 bool ImOperator::Read( wxString file, cv::Mat &image, int index )
 {
 	wxASSERT_MSG( !file.IsEmpty(), "Filename  cannot be empty" );
+    (void)index; // legacy multi-image TIFF index; cv::imread reads first only
 
-    int error;
+    cv::Mat loaded = cv::imread( (const char*)file.c_str(), cv::IMREAD_UNCHANGED );
+    if ( loaded.empty() )
+        return this->Terminate( ERR_FILE, (const char*)file.c_str() );
 
-    imFile* ifile = imFileOpen( file.c_str(), &error );
-    if ( !ifile )
-        return this->Terminate( ERR_FILE , (const char*)file.c_str() );
-
-    // Load bitmap through IM; then copy into a cv::Mat, normalising to
-    // single-channel 8-bit. Multi-channel (IM_RGB) sources are converted
-    // via imConvertColorSpace before the copy so the numeric behaviour
-    // matches the pre-swap pipeline.
-    _imImage *loaded = imFileLoadBitmap( ifile, index, &error );
-    imFileClose(ifile);
-    if ( !loaded )
-        return this->Terminate( ERR_READING , index, (const char*)file.c_str() );
-
-    // Force IM_BYTE.
-    if ( loaded->data_type != IM_BYTE ) {
-        _imImage *tmp = imImageCreate( loaded->width, loaded->height, loaded->color_space, IM_BYTE );
-        if (!tmp) { imImageDestroy(loaded); return this->Terminate( ERR_MEMORY ); }
-        imConvertDataType( loaded, tmp, 0, 0, 0, 0 );
-        imImageDestroy(loaded);
+    // Force 8-bit depth.
+    if ( loaded.depth() != CV_8U ) {
+        cv::Mat tmp;
+        loaded.convertTo(tmp, CV_8U);
         loaded = tmp;
     }
 
     ImageDestroy(image);
-    // Normalise RGB → grayscale at load time so downstream code always
-    // sees single-channel 8-bit buffers. Use IM's own imConvertColorSpace
-    // so the numeric behaviour matches the pre-swap pipeline.
-    if ( imColorModeMatch(loaded->color_space, IM_RGB) ) {
-        _imImage *gray = imImageCreate(loaded->width, loaded->height, IM_GRAY, IM_BYTE);
-        if (!gray) { imImageDestroy(loaded); return this->Terminate( ERR_MEMORY ); }
-        imConvertColorSpace(loaded, gray);
-        imImageDestroy(loaded);
-        loaded = gray;
+    // Normalise multi-channel input (BGR / BGRA) to grayscale so downstream
+    // code always sees single-channel 8-bit buffers. cv::cvtColor uses
+    // Rec.601 weights, matching IM's imConvertColorSpace conversion.
+    if ( loaded.channels() >= 3 ) {
+        cv::cvtColor(loaded, image, loaded.channels() == 4 ? cv::COLOR_BGRA2GRAY
+                                                            : cv::COLOR_BGR2GRAY);
+    } else {
+        image = loaded;
     }
-
-    image.create(loaded->height, loaded->width, CV_8UC1);
-    std::memcpy(image.data, loaded->data[0], (size_t)loaded->height * loaded->width);
-    if ( imColorModeMatch(loaded->color_space, IM_MAP) ) {
-        // preserve palette metadata on the operator so WriteAsMAP can restore it later
-        long *pal = loaded->palette;
-        if (pal) {
-            for (int i = 0; i < loaded->palette_count && i < 256; ++i)
-                m_opImMapPalette[i] = pal[i];
-        }
-    }
-    imImageDestroy(loaded);
     return true;
 }
 
@@ -197,21 +172,11 @@ bool ImOperator::ExtractPlane( cv::Mat &image, cv::Mat &extracted_plane, int pla
 
 bool ImOperator::ConvertToMAP( cv::Mat &image )
 {
-    // In the new storage model, the image is always single-plane 8-bit.
-    // ConvertToMAP historically wrapped a binary image (values 0/1) as MAP.
-    // Nothing to do to the buffer — just refresh the palette metadata for
-    // downstream WriteAsMAP().
-    long *pal = imPaletteGray();
-    pal[0] = imColorEncode( 255, 255, 255 ); // fond blanc
-    pal[1] = imColorEncode( 0, 0, 0 ); // noir
-    pal[2] = imColorEncode( 228, 228, 228 ); // gris = bord
-    pal[4] = imColorEncode( 0, 127, 0 ); // vert fonce = lettrine
-    pal[8] = imColorEncode( 0, 255, 0 ); // vert clair = texte dans portee
-    pal[16] = imColorEncode( 255, 127, 0 ); // orange = texte
-    pal[32] = imColorEncode( 255, 227, 0 ); // jaune = titre
-    pal[64] = imColorEncode( 0, 0, 255 ); // bleu =
-    pal[128] = imColorEncode( 255, 0, 255 ); // magenta =
-    for (int i = 0; i < 256; ++i) m_opImMapPalette[i] = pal[i];
+    // Legacy no-op: historically populated m_opImMapPalette with the
+    // aruspix classification palette so WriteAsMAP could emit a
+    // palette-indexed TIFF. WriteAsMAP now writes plain 8-bit gray, so
+    // there's nothing to do here. Kept as a stub so existing callers
+    // (ImPage::ExtractPlane, WriteAsMAP itself) don't need to change.
     (void)image;
 	return true;
 }
@@ -219,29 +184,11 @@ bool ImOperator::ConvertToMAP( cv::Mat &image )
 
 bool ImOperator::WriteAsMAP( wxString file, cv::Mat &image )
 {
-	wxASSERT_MSG( !file.IsEmpty(), "Filename  cannot be empty" );
-
-	if ( !ConvertToMAP( image ) )
-		return false;
-
-    ImView view(image, IM_MAP, m_opImMapPalette.data(), 256);
-
-    int error;
-    imFile *ifile = imFileNew( file.c_str(), "TIFF", &error);
-    if (error == IM_ERR_NONE)
-    {
-        imFileSetInfo( ifile, "RLE" );
-        imImageSetAttribute( view, "Software", IM_BYTE, 8, "Aruspix" );
-        imImageSetAttribute( view, "Author", IM_BYTE, 14, "Laurent Pugin" );
-        wxLogNull logNo;
-        error = imFileSaveImage( ifile, view );
-        imFileClose(ifile);
-    }
-
-    if (error == IM_ERR_NONE)
-        return true;
-    else
-        return this->Terminate( ERR_WRITING , (const char*)file.c_str());
+    // Previously wrote a palette-indexed IM_MAP TIFF so external viewers
+    // could render classification planes in colour (green=ornate letter
+    // etc.). The palette carried no functional information — Read() only
+    // consumes the raw 8-bit bitmask. Drop the palette; write plain gray.
+    return this->Write( file, image );
 }
 
 
@@ -249,29 +196,12 @@ bool ImOperator::Write( wxString file, const cv::Mat &image )
 {
 	wxASSERT_MSG( !file.IsEmpty(), "Filename  cannot be empty" );
 
-    int error;
-    int channels = image.channels();
-    int color_space = (channels == 3) ? IM_RGB : IM_GRAY;
-    ImView view(image, color_space);
-
-    imFile *ifile = imFileNew( file.c_str(), "TIFF", &error);
-    if (error == IM_ERR_NONE)
-    {
-        imFileSetInfo( ifile, "RLE" );
-        imImageSetAttribute( view, "Software", IM_BYTE, 8, "Aruspix" );
-        imImageSetAttribute( view, "Author", IM_BYTE, 14, "Laurent Pugin" );
-        imImageSetAttribute( view, "Photometric", IM_BYTE, 1, "1");
-        wxLogNull *logNo = new wxLogNull();
-        error = imFileSaveImage( ifile, view );
-		imFileClose(ifile);
-        delete logNo;
-        if (error == IM_ERR_NONE)
-            return true;
-        else
-            return this->Terminate( ERR_WRITING , (const char*)file.c_str());
-    }
-    else
-        return this->Terminate( ERR_WRITING , (const char*)file.c_str());
+    // cv::imwrite chooses the codec by extension. TIFF is compressed via
+    // libtiff's default (LZW); the pre-swap RLE ("packbits") was chosen for
+    // historical compatibility with IM and offers no meaningful advantage.
+    if ( !cv::imwrite( (const char*)file.c_str(), image ) )
+        return this->Terminate( ERR_WRITING, (const char*)file.c_str() );
+    return true;
 }
 
 bool ImOperator::GetImagePlane( cv::Mat &image , int plane, int factor )

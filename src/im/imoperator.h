@@ -15,8 +15,6 @@
 #include "wx/ffile.h"
 #include "wx/file.h"
 
-#include <array>
-
 #include <opencv2/core.hpp>
 
 #include "app/axprogressdlg.h"
@@ -177,10 +175,6 @@ protected:
     cv::Mat m_opImTmp2;
     cv::Mat m_opImMask;
     cv::Mat m_opImAlign;
-
-    // Palette for MAP-encoded images, only used when writing TIFF-MAP output.
-    // Populated by ConvertToMAP(); read by WriteAsMAP().
-    std::array<long, 256> m_opImMapPalette;
 
     int *m_opHist;
     int *m_opLines1;
