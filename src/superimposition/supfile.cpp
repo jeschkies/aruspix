@@ -21,16 +21,6 @@
 #include "app/aximage.h"
 #include "app/axprocess.h"
 
-// IMLIB
-#include <im.h>
-#include <im_counter.h>
-#include <im_image.h>
-#include <im_convert.h>
-#include <im_process.h>
-#include <im_util.h>
-#include <im_binfile.h>
-#include <im_math_op.h>
-
 
 
 //----------------------------------------------------------------------------
@@ -223,8 +213,7 @@ void SupFile::GetSrc1( AxImage *image )
 	wxASSERT_MSG( m_imRegisterPtr, "m_imRegisterPtr cannot be NULL" );
 	wxASSERT_MSG( !m_imRegisterPtr->m_src1.empty(), "Src1 cannot be NULL" );
 
-	ImView v( m_imRegisterPtr->m_src1, IM_GRAY );
-	SetImImage( v, image );
+	SetCvMat( image, m_imRegisterPtr->m_src1 );
 }
 
 void SupFile::GetSrc2( AxImage *image )
@@ -233,8 +222,7 @@ void SupFile::GetSrc2( AxImage *image )
 	wxASSERT_MSG( m_imRegisterPtr, "m_imRegisterPtr cannot be NULL" );
 	wxASSERT_MSG( !m_imRegisterPtr->m_src2.empty(), "Src2 cannot be NULL" );
 
-	ImView v( m_imRegisterPtr->m_src2, IM_GRAY );
-	SetImImage( v, image );
+	SetCvMat( image, m_imRegisterPtr->m_src2 );
 }
 
 void SupFile::GetResult( AxImage *image )
@@ -243,8 +231,7 @@ void SupFile::GetResult( AxImage *image )
 	wxASSERT_MSG( m_imRegisterPtr, "m_imRegisterPtr cannot be NULL" );
 	wxASSERT_MSG( !m_imRegisterPtr->m_result.empty(), "Result image cannot be NULL" );
 
-	ImView v( m_imRegisterPtr->m_result, IM_RGB );
-	SetImImage( v, image );
+	SetCvMat( image, m_imRegisterPtr->m_result );
 }
 
 bool SupFile::CancelSuperimposition(bool ask_user)

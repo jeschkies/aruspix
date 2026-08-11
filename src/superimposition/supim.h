@@ -112,8 +112,8 @@ public:
     wxPoint ToRender( imPoint p );
     
 private:
-    _imImage *m_greenIm;
-    _imImage *m_redIm;
+    cv::Mat m_greenIm;
+    cv::Mat m_redIm;
     AxImageController *m_imControl1Ptr;
     AxImageController *m_imControl2Ptr;
     SupImSrcWindow *m_viewSrc1Ptr;
