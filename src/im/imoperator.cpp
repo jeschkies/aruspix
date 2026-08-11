@@ -434,7 +434,7 @@ void ImOperator::DistByCorrelation( const cv::Mat &im1,  const cv::Mat &im2,
     wxASSERT_MSG(!im1.empty(), wxT("Image 1 cannot be NULL") );
     wxASSERT_MSG(!im2.empty(), wxT("Image 2 cannot be NULL") );
 
-    // this prevent imProccessCrop to crash when the image is too small
+    // Skip if the source is too small to hold the requested window.
     if ( (im2.cols < 4) || (im2.rows < 4) ) {
         return;
     }
@@ -442,47 +442,64 @@ void ImOperator::DistByCorrelation( const cv::Mat &im1,  const cv::Mat &im2,
     window.SetWidth( min( window.GetWidth(), im2.cols / 2  - 1) );
     window.SetHeight( min( window.GetHeight(), im2.rows / 2 - 1) );
 
-    ImView view_im1(im1, IM_GRAY);
-    ImView view_im2(im2, IM_GRAY);
+    // FFT-based cross-correlation. Mirrors IM's imProcessCrossCorrelation:
+    // F1 * conj(F2) via cv::mulSpectrums(..., conjB=true), inverse DFT with
+    // DFT_SCALE for the 1/N normalisation, then quadrant swap so origin
+    // (zero shift) sits at the image centre.
+    cv::Mat f1, f2;
+    im1.convertTo(f1, CV_32F);
+    im2.convertTo(f2, CV_32F);
 
-    _imImage *corr = imImageCreate( im1.cols, im1.rows, IM_GRAY, IM_CFLOAT);
-    imProcessCrossCorrelation( view_im1, view_im2, corr );
+    cv::Mat F1, F2;
+    cv::dft(f1, F1, cv::DFT_COMPLEX_OUTPUT);
+    cv::dft(f2, F2, cv::DFT_COMPLEX_OUTPUT);
 
-    _imImage *corrCrop = imImageCreate( window.GetWidth() * 2 + 1, window.GetHeight() * 2 + 1,
-        IM_GRAY, IM_CFLOAT );
-    int xmin = im1.cols / 2 - window.GetWidth();
-    int ymin = im1.rows / 2 - window.GetHeight();
-    imProcessCrop( corr, corrCrop, xmin, ymin );
+    cv::Mat cross_spec;
+    cv::mulSpectrums(F1, F2, cross_spec, 0, /*conjB=*/true);
 
-    _imImage *corrReal = imImageCreate( corrCrop->width , corrCrop->height , corrCrop->color_space, IM_BYTE );
-    imConvertDataType( corrCrop, corrReal, IM_CPX_MAG, IM_GAMMA_LINEAR, 0, IM_CAST_MINMAX);
+    cv::Mat corr;
+    cv::idft(cross_spec, corr, cv::DFT_SCALE | cv::DFT_REAL_OUTPUT);
 
-    int width = corrReal->width;
-    int height = corrReal->height;
-    int max = 0, maxX = 0, maxY = 0;
-    imbyte *buf = (imbyte*)corrReal->data[0];
+    // FFT-shift to bring the zero-shift origin from (0,0) to (w/2, h/2).
+    const int hw = corr.cols / 2;
+    const int hh = corr.rows / 2;
+    cv::Mat corr_shift(corr.size(), corr.type());
+    corr(cv::Rect(hw, hh, corr.cols - hw, corr.rows - hh))
+        .copyTo(corr_shift(cv::Rect(0, 0, corr.cols - hw, corr.rows - hh)));
+    corr(cv::Rect(0, hh, hw, corr.rows - hh))
+        .copyTo(corr_shift(cv::Rect(corr.cols - hw, 0, hw, corr.rows - hh)));
+    corr(cv::Rect(hw, 0, corr.cols - hw, hh))
+        .copyTo(corr_shift(cv::Rect(0, corr.rows - hh, corr.cols - hw, hh)));
+    corr(cv::Rect(0, 0, hw, hh))
+        .copyTo(corr_shift(cv::Rect(corr.cols - hw, corr.rows - hh, hw, hh)));
 
-    for (int y = 0; y < height; y++)
-    {
-        for (int x = 0; x < width; x++)
-        {
-            if ( buf[y * width + x] > max )
-            {
-                max = buf[y * width + x];
-                maxX = x;
-                maxY = y;
-            }
-        }
+    // Crop the window around the (now-centred) origin.
+    const int cw = window.GetWidth()  * 2 + 1;
+    const int ch = window.GetHeight() * 2 + 1;
+    const int xmin = im1.cols / 2 - window.GetWidth();
+    const int ymin = im1.rows / 2 - window.GetHeight();
+    cv::Mat corr_crop = corr_shift(cv::Rect(xmin, ymin, cw, ch)).clone();
+
+    // Magnitude of a real cross-correlation is |value|; scale to 0..255
+    // (IM_CAST_MINMAX) so *maxCorr matches the pre-swap byte-scaled value.
+    cv::Mat corr_abs = cv::abs(corr_crop);
+    double mn, mx;
+    cv::minMaxLoc(corr_abs, &mn, &mx);
+    cv::Mat corr_byte;
+    if (mx > mn) {
+        corr_abs.convertTo(corr_byte, CV_8U,
+                           255.0 / (mx - mn), -255.0 * mn / (mx - mn));
+    } else {
+        corr_byte = cv::Mat::zeros(corr_abs.size(), CV_8U);
     }
 
-    *decalageX = maxX - window.GetWidth();
-    *decalageY = maxY - window.GetHeight();
+    double maxVal;
+    cv::Point maxLoc;
+    cv::minMaxLoc(corr_byte, nullptr, &maxVal, nullptr, &maxLoc);
 
-    if (maxCorr) *maxCorr = max;
-
-    imImageDestroy( corrReal );
-    imImageDestroy( corrCrop );
-    imImageDestroy( corr );
+    *decalageX = maxLoc.x - window.GetWidth();
+    *decalageY = maxLoc.y - window.GetHeight();
+    if (maxCorr) *maxCorr = (int)maxVal;
 }
 
 

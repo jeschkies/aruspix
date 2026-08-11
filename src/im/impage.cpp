@@ -448,53 +448,15 @@ bool ImPage::Check( wxString infile, int max_size, int min_size, int index )
     // is always CV_8UC1 (single-plane 8-bit), so the IM_BYTE, IM_RGB, and
     // IM_BINARY branches are unreachable and have been removed.
 
-    // verifier negatif - positif : looking at the TIFF tag
-	int error;
-	imFile* ifile = imFileOpen( infile.c_str(), &error);
-	if (!ifile)
-		return this->Terminate( ERR_FILE , (const char*)infile.c_str());
-
-	int attrib_data_type, attrib_count;
-	imFileReadImageInfo( ifile, 0, NULL, NULL, NULL, NULL);
-	imFileGetAttributeList( ifile, NULL, &attrib_count);
-	short attrib_data = *(short*)imFileGetAttribute( ifile, "Photometric", &attrib_data_type, &attrib_count);
-    imFileClose( ifile );
-    bool isRgb = true;
-
-    // we have a Photometric tag
-    if ( attrib_count == 1 )
-    {
-        wxLogDebug("RBG image mean %f", cv::mean(m_opImMain)[0] );
-        wxLogDebug("Photometric %hd", (attrib_data) );
-		if ( (attrib_data) != (short)PHOTOMETRIC_RGB )
-        {
-            m_opImTmp1 = m_opImMain.clone();
-            if ( m_opImTmp1.empty() )
-                return this->Terminate( ERR_MEMORY );
-            cv::bitwise_not( m_opImMain, m_opImTmp1 );
-            SwapImages( m_opImMain, m_opImTmp1 );
-            isRgb = false;
-        }
-	}
-
-    if ( isRgb ) {
-        wxLogDebug("RBG image mean %f", cv::mean(m_opImMain)[0] );
-        bool invert = true;
-        //if ( AxImage::s_checkIfNegative )
-        //    invert = (istats.mean > 127) ? true : false;
-        //else if ( istats.mean < 127 )
-        //    wxLogWarning( _("Image is negative according to the mean, check the option in 'Preferences' to have it corrected") );
-        wxLogWarning( "Check if negative disabled" );
-
-        if ( invert )
-        {
-            m_opImTmp1 = m_opImMain.clone();
-            if ( m_opImTmp1.empty() )
-                return this->Terminate( ERR_MEMORY );
-            cv::bitwise_not( m_opImMain, m_opImTmp1 );
-            SwapImages( m_opImMain, m_opImTmp1 );
-        }
-    }
+    // Historically the pipeline inspected the TIFF Photometric tag to
+    // decide whether to invert. Reading the three branches, every path
+    // ended up inverting exactly once (Photometric tag != RGB inverts;
+    // Photometric tag == RGB or missing enters the fall-through branch
+    // and inverts). The auto-detect was already commented out with the
+    // "Check if negative disabled" warning. Reduce to the effective
+    // behaviour and drop the imFile* dependency.
+    wxLogDebug("RBG image mean %f", cv::mean(m_opImMain)[0] );
+    cv::bitwise_not( m_opImMain, m_opImMain );
 
 	// historgramme (debug)
 	//unsigned long histo[256];
