@@ -176,17 +176,9 @@ bool ImOperator::ExtractPlane( cv::Mat &image, cv::Mat &extracted_plane, int pla
 	if ( !ConvertToMAP( image ) )
 		return false;
 
-    // Bridge to IM only for the bit-plane extract/reset on the IM_MAP-encoded
-    // classification bitmask; the surrounding bitwise/arithmetic ops go
-    // through cv:: directly.
-    cv::Mat main_plane = image.clone();
-
-    {
-        ImView view_image(image, IM_MAP, m_opImMapPalette.data(), 256);
-        ImView view_main(main_plane, IM_MAP, m_opImMapPalette.data(), 256);
-        imProcessBitPlane( view_image, view_main, 0, 0 );
-        imProcessBitPlane( view_image, view_image, 0, 1 ); // reset
-    }
+    cv::Mat main_plane;
+    ax::bit_plane_extract( image, main_plane, 0 );
+    ax::bit_plane_reset( image, 0 );
     cv::bitwise_not( main_plane, main_plane );
     cv::bitwise_or( main_plane, extracted_plane, main_plane );
     cv::bitwise_not( main_plane, main_plane );
@@ -196,10 +188,7 @@ bool ImOperator::ExtractPlane( cv::Mat &image, cv::Mat &extracted_plane, int pla
     {
         cv::add( extracted_plane, extracted_plane, extracted_plane );
     }
-    {
-        ImView view_image(image, IM_MAP, m_opImMapPalette.data(), 256);
-        imProcessBitPlane( view_image, view_image, plane_number, 1 ); // reset
-    }
+    ax::bit_plane_reset( image, plane_number );
     cv::add( image, extracted_plane, image );
 
 	return true;
@@ -291,13 +280,7 @@ bool ImOperator::GetImagePlane( cv::Mat &image , int plane, int factor )
         return this->Terminate( ERR_UNKNOWN );
 
     ImageDestroy(image);
-    // Extract bit-plane through IM to preserve exact semantics.
-    image.create(m_opImMap.rows, m_opImMap.cols, CV_8UC1);
-    {
-        ImView src_view(m_opImMap, IM_MAP, m_opImMapPalette.data(), 256);
-        ImView dst_view(image, IM_BINARY);
-        imProcessBitPlane( src_view, dst_view, plane, 0 );
-    }
+    ax::bit_plane_extract( m_opImMap, image, plane );
 
     // resize
     for(int i = 1; i < factor; i*= 2 )

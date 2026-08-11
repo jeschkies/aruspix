@@ -627,22 +627,9 @@ bool ImStaff::GetStaffBorders( int threshold_in_percent, bool analyse_segments )
                0, 0, cv::INTER_NEAREST);
     SwapImages( m_opIm, m_opImTmp1 );
 
-    // convovle
-    m_opImTmp1 = m_opIm.clone();
-    if ( m_opImTmp1.empty() )
-            return this->Terminate( ERR_MEMORY );
-    imImage* kernel = imImageCreate( 3, 1, IM_GRAY, IM_INT);
-    imImageSetAttribute(kernel, "Description", IM_BYTE, -1, (void*)"Erode");
-    int* kernel_data = (int*)kernel->data[0];
-    for(i = 0; i < kernel->count; i++)
-        kernel_data[i] = 0;
-    //imProcessBinMorphClose( m_opIm, m_opImTmp1 , 3, 1);
-    {
-        ImView src_view(m_opIm, IM_BINARY);
-        ImView dst_view(m_opImTmp1, IM_BINARY);
-        imProcessBinMorphConvolve( src_view, dst_view, kernel, 0, 1 );
-    }
-    imImageDestroy(kernel);
+    // convovle: horizontal dilation (3x1 kernel)
+    cv::dilate(m_opIm, m_opImTmp1,
+               cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 1)));
     SwapImages( m_opIm, m_opImTmp1 );
 
     // roi image : seulement 120 pixels de haut

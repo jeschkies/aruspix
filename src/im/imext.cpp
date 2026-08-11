@@ -191,6 +191,25 @@ void remove_by_area(const cv::Mat& src, cv::Mat& dst, int connectivity,
 	}
 }
 
+void bit_plane_extract(const cv::Mat& src, cv::Mat& dst, int plane)
+{
+	if (src.empty() || src.type() != CV_8UC1) return;
+	dst.create(src.rows, src.cols, CV_8UC1);
+	const uchar mask = (uchar)(1 << plane);
+	for (int y = 0; y < src.rows; ++y) {
+		const uchar* s = src.ptr<uchar>(y);
+		uchar*       d = dst.ptr<uchar>(y);
+		for (int x = 0; x < src.cols; ++x)
+			d[x] = (s[x] & mask) ? 1 : 0;
+	}
+}
+
+void bit_plane_reset(cv::Mat& image, int plane)
+{
+	if (image.empty() || image.type() != CV_8UC1) return;
+	cv::bitwise_and(image, cv::Scalar((uchar)~(1 << plane)), image);
+}
+
 void calc_rotate_size(int width, int height, int *new_width, int *new_height,
                       double cos0, double sin0)
 {

@@ -42,6 +42,16 @@ void remove_by_area(const cv::Mat& src, cv::Mat& dst, int connectivity,
 void calc_rotate_size(int width, int height, int *new_width, int *new_height,
                       double cos0, double sin0);
 
+// Extract bit `plane` (0..7) from each byte in `src` into `dst`.
+// `dst`[i] = (src[i] >> plane) & 1.  Matches imProcessBitPlane's
+// non-reset (reset=0) behaviour on IM_MAP-encoded bitmasks.
+// `src` 8-bit single-channel; `dst` allocated/resized to match.
+void bit_plane_extract(const cv::Mat& src, cv::Mat& dst, int plane);
+
+// Zero bit `plane` in every pixel of `image` in place. Matches
+// imProcessBitPlane with reset=1: image[i] &= ~(1 << plane).
+void bit_plane_reset(cv::Mat& image, int plane);
+
 }  // namespace ax
 
 #endif  // __cplusplus

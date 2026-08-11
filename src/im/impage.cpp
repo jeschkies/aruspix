@@ -868,26 +868,11 @@ bool ImPage::FindStaves( int min, int max, bool normalize, bool crop )
     //if ( !Write( rle, m_opIm ) )
     //    return false;
 
-    // convolve pour allonger le run
-    m_opImTmp1 = m_opIm.clone();
-    if ( m_opImTmp1.empty() )
-        return this->Terminate( ERR_MEMORY );
-
-    imImage* kernel = imImageCreate( 7, 1, IM_GRAY, IM_INT);
-    imImageSetAttribute(kernel, "Description", IM_BYTE, -1, (void*)"Erode");
-
-    int* kernel_data = (int*)kernel->data[0];
-    for(i = 0; i < kernel->count; i++)
-        kernel_data[i] = 0;
-
+    // convolve pour allonger le run: horizontal dilation (7x1 kernel)
     if ( !m_progressDlg->SetOperation( _("Sharpen staff lines ...") ) )
         return this->Terminate( ERR_CANCELED );
-    {
-        ImView vs(m_opIm, IM_BINARY);
-        ImView vd(m_opImTmp1, IM_BINARY);
-        imProcessBinMorphConvolve( vs, vd, kernel, 0, 1);
-    }
-    imImageDestroy(kernel);
+    cv::dilate(m_opIm, m_opImTmp1,
+               cv::getStructuringElement(cv::MORPH_RECT, cv::Size(7, 1)));
     SwapImages( m_opIm, m_opImTmp1 );
 
     //wxString rle_conv = m_path + "rle_conv.tif";
@@ -1316,25 +1301,15 @@ bool ImPage::FindOrnateLetters( )
     SwapImages( m_opIm, m_opImTmp1 );
 
     // close
-    m_opImTmp1 = m_opIm.clone();
-    if ( m_opImTmp1.empty() )
-        return this->Terminate( ERR_MEMORY );
-    {
-        ImView vs(m_opIm, IM_BINARY);
-        ImView vd(m_opImTmp1, IM_BINARY);
-        imProcessBinMorphClose( vs, vd, 3, 2);
-    }
+    cv::morphologyEx(m_opIm, m_opImTmp1, cv::MORPH_CLOSE,
+                     cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3)),
+                     cv::Point(-1, -1), 2);
     SwapImages( m_opIm, m_opImTmp1 );
 
     // open
-    m_opImTmp1 = m_opIm.clone();
-    if ( m_opImTmp1.empty() )
-        return this->Terminate( ERR_MEMORY );
-    {
-        ImView vs(m_opIm, IM_BINARY);
-        ImView vd(m_opImTmp1, IM_BINARY);
-        imProcessBinMorphOpen( vs, vd, 3, 1);
-    }
+    cv::morphologyEx(m_opIm, m_opImTmp1, cv::MORPH_OPEN,
+                     cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3)),
+                     cv::Point(-1, -1), 1);
     SwapImages( m_opIm, m_opImTmp1 );
 
     // fill holes
@@ -1349,28 +1324,18 @@ bool ImPage::FindOrnateLetters( )
     SwapImages( m_opIm, m_opImTmp1 );
 
     // open
-    m_opImTmp1 = m_opIm.clone();
-    if ( m_opImTmp1.empty() )
-        return this->Terminate( ERR_MEMORY );
-    {
-        ImView vs(m_opIm, IM_BINARY);
-        ImView vd(m_opImTmp1, IM_BINARY);
-        imProcessBinMorphOpen( vs, vd, 5, 1);
-    }
+    cv::morphologyEx(m_opIm, m_opImTmp1, cv::MORPH_OPEN,
+                     cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5)),
+                     cv::Point(-1, -1), 1);
     SwapImages( m_opIm, m_opImTmp1 );
 
     // prune
     ax::remove_by_area( m_opIm, m_opIm, 4, (int)(pow( 100 / TIP_FACTOR_1, 2 )), 0 );
 
     // close
-    m_opImTmp1 = m_opIm.clone();
-    if ( m_opImTmp1.empty() )
-        return this->Terminate( ERR_MEMORY );
-    {
-        ImView vs(m_opIm, IM_BINARY);
-        ImView vd(m_opImTmp1, IM_BINARY);
-        imProcessBinMorphClose( vs, vd, 5, 2);
-    }
+    cv::morphologyEx(m_opIm, m_opImTmp1, cv::MORPH_CLOSE,
+                     cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5)),
+                     cv::Point(-1, -1), 2);
     SwapImages( m_opIm, m_opImTmp1 );
 
     // supprimer les zones d'elements dont la hauteur moyenne < 140
@@ -1746,20 +1711,9 @@ void ImPage::CleanBorder( int rows[], int size, cv::Mat &border, cv::Mat &image,
         return;
 
 
-    // convolution : kernel ou close + fillholes
-    imImage* kernel = imImageCreate( 1, 5, IM_GRAY, IM_INT);
-    imImageSetAttribute(kernel, "Description", IM_BYTE, -1, (void*)"Erode");
-    int* kernel_data = (int*)kernel->data[0];
-    for(i = 0; i < kernel->count; i++)
-        kernel_data[i] = 0;
-
-    //imProcessBinMorphClose( border, tmp , 3, 1);
-    {
-        ImView vs(border, IM_BINARY);
-        ImView vd(tmp, IM_BINARY);
-        imProcessBinMorphConvolve( vs, vd, kernel, 0, 1);
-    }
-    imImageDestroy(kernel);
+    // convolution : vertical dilation (1x5 kernel)
+    cv::dilate(border, tmp,
+               cv::getStructuringElement(cv::MORPH_RECT, cv::Size(1, 5)));
 
     cv::Mat tmp2 = tmp.clone();
     if ( tmp2.empty() )
@@ -2230,11 +2184,7 @@ bool ImPage::ChangeClassification( int plane_number  )
 
     for (int i = 0; i <= IMAGE_PLANES; i ++ )
     {
-		{
-			ImView vs(m_opImTmp2, IM_MAP, m_opImMapPalette.data(), 256);
-			ImView vd(m_opImTmp1, IM_BINARY);
-			imProcessBitPlane( vs, vd, i, 0);
-		}
+		ax::bit_plane_extract( m_opImTmp2, m_opImTmp1, i );
 		if ( i == plane_number )
 		{
 			cv::bitwise_or( m_opImTmp1, m_selection, m_opImTmp1 );
