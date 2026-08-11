@@ -241,7 +241,9 @@ void rotate_center(const cv::Mat& src, cv::Mat& dst,
 	// cv::getRotationMatrix2D produces the same M_IM = [cos sin; -sin cos]
 	// convention as an inverse (dst -> src) map, which is exactly what
 	// cv::warpAffine expects by default.
-	const double angle_deg = std::atan2(sin0, cos0) * 180.0 / M_PI;
+	// CV_PI is defined by opencv2/core.hpp and works on MSVC where M_PI
+	// requires _USE_MATH_DEFINES.
+	const double angle_deg = std::atan2(sin0, cos0) * 180.0 / CV_PI;
 	cv::Point2f center(src.cols / 2.0f, src.rows / 2.0f);
 	cv::Mat M = cv::getRotationMatrix2D(center, angle_deg, 1.0);
 	M.at<double>(0, 2) += (new_w - src.cols) / 2.0;
