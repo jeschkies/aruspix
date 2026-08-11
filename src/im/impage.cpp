@@ -1360,27 +1360,29 @@ bool ImPage::FindOrnateLetters( )
     m_opImTmp2.setTo(0);
     //cv::bitwise_not( m_opImTmp2, m_opImTmp2 );
 
-    // imAnalyzeFindRegions requires IM_USHORT output; keep it as an IM
-    // buffer since our cv::Mat pipeline uses CV_8U throughout.
-    _imImage *regions = imImageCreate(m_opIm.cols, m_opIm.rows, IM_GRAY, IM_USHORT);
-    if (!regions)
-        return this->Terminate( ERR_MEMORY );
-
-    int region_count = 0;
+    cv::Mat labels, stats, centroids;
+    int n = cv::connectedComponentsWithStats(m_opIm, labels, stats, centroids,
+                                              4, CV_32S);
+    int region_count = n - 1; // exclude background label 0
+    if (region_count > 0)
     {
-        ImView vs(m_opIm, IM_BINARY);
-        imAnalyzeFindRegions(vs, regions, 4, 1, &region_count);
-    }
-    if (region_count)
-    {
+        // Layout: [xmin, xmax, ymin, ymax] per region, xmax/ymax inclusive
+        // (matches imAnalyzeBoundingBoxes's pixel-index convention).
         int* boxes = (int*)malloc(4 * region_count * sizeof(int));
-        memset(boxes, 0, 4 *  region_count * sizeof(int));
-        imAnalyzeBoundingBoxes(regions, boxes, region_count);
+        for (int r = 0; r < region_count; ++r) {
+            int L = stats.at<int>(r + 1, cv::CC_STAT_LEFT);
+            int T = stats.at<int>(r + 1, cv::CC_STAT_TOP);
+            int W = stats.at<int>(r + 1, cv::CC_STAT_WIDTH);
+            int H = stats.at<int>(r + 1, cv::CC_STAT_HEIGHT);
+            boxes[4*r + 0] = L;
+            boxes[4*r + 1] = L + W - 1;
+            boxes[4*r + 2] = T;
+            boxes[4*r + 3] = T + H - 1;
+        }
         int margins[4] = {50, 10, 50, 50};
         this->MoveElements( m_opImMain, m_opImTmp2, boxes, region_count, margins, TIP_FACTOR_1 );
         free( boxes );
     }
-    imImageDestroy( regions );
 
     if ( !ExtractPlane( m_opImMap, m_opImTmp2, IMAGE_ORNATE_LETTER ) )
         return false;
@@ -1445,43 +1447,33 @@ bool ImPage::FindText( )
     int y_margin1 = min( text_centroid - STAFF / 2 - TP_MARGIN_MIN, TP_MARGIN_Y1 );
     int y_margin2 = min( text_centroid - STAFF / 2 - TP_MARGIN_MIN, TP_MARGIN_Y2 );
 
-    // imAnalyzeFindRegions needs IM_USHORT storage; keep an IM buffer for it.
-    _imImage *regions = imImageCreate(m_opImMain.cols, m_opImMain.rows, IM_GRAY, IM_USHORT);
-    if (!regions)
-        return this->Terminate( ERR_MEMORY );
-
-    int region_count = 0;
-    {
-        ImView vs(m_opImMain, IM_BINARY);
-        imAnalyzeFindRegions(vs, regions, 4, 1, &region_count);
-    }
+    cv::Mat labels, stats, centroids;
+    int n = cv::connectedComponentsWithStats(m_opImMain, labels, stats, centroids,
+                                              4, CV_32S);
+    int region_count = n - 1;
     if (!region_count)
-    {
-        imImageDestroy(regions);
         return this->Terminate( ERR_NONE );
-    }
 
-    // calcul des centroids
-    double* cx = (double*)malloc(region_count*sizeof(double));
-    memset(cx, 0, region_count*sizeof(double));
+    // extract centroids into a flat array indexed by (label - 1)
     double* cy = (double*)malloc(region_count*sizeof(double));
-    memset(cy, 0, region_count*sizeof(double));
-    imAnalyzeMeasureCentroid (regions, NULL, region_count, cx, cy);
+    for (int r = 0; r < region_count; ++r) {
+        cy[r] = centroids.at<double>(r + 1, 1);
+    }
 
     int y_min, y_max, i;
     imbyte* img_data = NULL;
-    imushort* region_data = NULL;
+    int32_t* region_data = NULL;
+    const int total = m_opImMain.rows * m_opImMain.cols;
 
     m_opImMain.setTo(0);
     img_data = (imbyte*)m_opImMain.data;
-    region_data = (imushort*)regions->data[0];
-    for (i = 0; i < regions->count; i++)
+    region_data = labels.ptr<int32_t>();
+    for (i = 0; i < total; i++)
     {
-        *img_data = 0;
         // conserver si le centroid y dans une fourchette ( -15 + 35 autour du centroid de texte
         if (*region_data)
         {
-            float centroid = cy[ (*region_data) -1 ];
+            float centroid = cy[ (*region_data) - 1 ];
             for (st = 0; st < nb_staves; st++ )
             {
                 y_min = max( 0, m_staves[st].m_y - text_centroid - y_margin1 );
@@ -1500,23 +1492,21 @@ bool ImPage::FindText( )
 
     if ( !ExtractPlane( m_opImMap, m_opImMain, IMAGE_LYRICS ) )
     {
-        free(cx);
         free(cy);
-        imImageDestroy(regions);
         return false;
     }
 
     m_opImMain.setTo(0);
     img_data = (imbyte*)m_opImMain.data;
-    region_data = (imushort*)regions->data[0];
+    region_data = labels.ptr<int32_t>();
     //y_min = min( m_opImMain.rows - 1, m_staves[nb_staves - 1].m_y + STAFF / 2 + TP_MARGIN_Y_TITLE );
     y_min = min( m_opImMain.rows - 1, m_staves[0].m_y + STAFF / 2 + TP_MARGIN_Y_TITLE );
-    for (i = 0; i < regions->count; i++)
+    for (i = 0; i < total; i++)
     {
         // conserver si le centroid y au dessus de y min
         if (*region_data)
         {
-            float centroid = cy[ (*region_data) -1 ];
+            float centroid = cy[ (*region_data) - 1 ];
             if ( centroid > y_min )
             {
                 *img_data = 1;
@@ -1526,9 +1516,7 @@ bool ImPage::FindText( )
         img_data++;
         region_data++;
     }
-    free(cx);
     free(cy);
-    imImageDestroy(regions);
 
     if ( !ExtractPlane( m_opImMap, m_opImMain, IMAGE_TITLE ) )
         return false;
@@ -2024,32 +2012,22 @@ bool ImPage::MagicSelection( int x, int y, AxImage *selection, int *xmin, int *y
 	// Threshold anything non-zero to 1 to match imImageMakeBinary().
 	cv::threshold(m_opImMain, m_opImMain, 0, 1, cv::THRESH_BINARY);
 
-    _imImage *regions = imImageCreate(m_opImMain.cols, m_opImMain.rows, IM_GRAY, IM_USHORT);
-    if (!regions)
-        return this->Terminate( ERR_MEMORY );
-
-    int region_count = 0;
-    {
-        ImView vs(m_opImMain, IM_BINARY);
-        imAnalyzeFindRegions(vs, regions, 4, 1, &region_count);
-    }
+    cv::Mat regions, stats, centroids;
+    int n = cv::connectedComponentsWithStats(m_opImMain, regions, stats, centroids,
+                                              4, CV_32S);
+    int region_count = n - 1;
     if (!region_count)
-    {
-        imImageDestroy(regions);
         return this->Terminate( ERR_NONE );
-    }
 
-	imushort* img_data = (imushort*)regions->data[0];
+	int32_t* img_data = regions.ptr<int32_t>();
 	imbyte* img_data_main = (imbyte*)m_opImMain.data;
-	imushort pixel = *(img_data + (y * regions->width) + x);
+	int32_t pixel = img_data[y * regions.cols + x];
 
     if (!pixel)
-    {
-        imImageDestroy(regions);
         return this->Terminate( ERR_NONE );
-    }
 
-	for (int i = 0; i < regions->count; i++)
+	const int total = regions.rows * regions.cols;
+	for (int i = 0; i < total; i++)
 	{
 		if (*img_data)
 		{
@@ -2065,12 +2043,18 @@ bool ImPage::MagicSelection( int x, int y, AxImage *selection, int *xmin, int *y
 		img_data++;
 	}
 
+	// Bounding box of the pixel==1 selection: read from stats for the
+	// clicked label. Layout matches the old imAnalyzeBoundingBoxes +1
+	// convention (box[1]/box[3] used as exclusive maxima by the crop below).
 	int box[4];
-	memset( box, 0, 4 * sizeof( int ) );
-	imAnalyzeBoundingBoxes(regions, box, 1);
-	box[1] += 1; // bug in imAnalyzeBoundingBoxes ??? needed
-	box[3] += 1;
-    imImageDestroy(regions);
+	int L = stats.at<int>(pixel, cv::CC_STAT_LEFT);
+	int T = stats.at<int>(pixel, cv::CC_STAT_TOP);
+	int W = stats.at<int>(pixel, cv::CC_STAT_WIDTH);
+	int H = stats.at<int>(pixel, cv::CC_STAT_HEIGHT);
+	box[0] = L;
+	box[1] = L + W; // exclusive xmax
+	box[2] = T;
+	box[3] = T + H; // exclusive ymax
 
     // selection image
     m_selection = m_opImMain(cv::Rect(box[0], box[2], box[1] - box[0], box[3] - box[2])).clone();

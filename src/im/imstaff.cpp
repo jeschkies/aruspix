@@ -115,15 +115,10 @@ void CalcWinFeatures(const cv::Mat &image, float *features, int position_v, int 
 	//	imProcessInsert( imdebug, image, imdebug, stepdebug, 0 );
 
 	//global
-	// imAnalyzeFindRegions writes 16-bit region labels; keep an IM_USHORT
-	// scratch buffer wrapped as a legacy _imImage* header via ImView.
-	cv::Mat imRegions(image.rows, image.cols, CV_16UC1);
-	int region_count = 0;
-	{
-		ImView src_view(image, IM_BINARY);
-		ImView dst_view(imRegions, IM_GRAY);
-		imAnalyzeFindRegions ( src_view, dst_view, 8, 1, &region_count );
-	}
+	cv::Mat imRegions, stats, centroids;
+	int n = cv::connectedComponentsWithStats(image, imRegions, stats, centroids,
+	                                          8, CV_16U);
+	int region_count = n - 1; // exclude background label 0
 
 	if (region_count == 0)
 	{
@@ -133,14 +128,12 @@ void CalcWinFeatures(const cv::Mat &image, float *features, int position_v, int 
 	// euler (+-)
 	features[0] = 1.0 / (region_count + 1); // global
 
-	// centroid
+	// centroid — copy from CC stats.
 	double *cx = (double*)malloc(region_count*sizeof(double));
-	memset( cx, 0, region_count*sizeof(double));
 	double *cy = (double*)malloc(region_count*sizeof(double));
-	memset( cy, 0, region_count*sizeof(double));
-	{
-		ImView regions_view(imRegions, IM_GRAY);
-		imAnalyzeMeasureCentroid( regions_view, NULL, region_count, cx, cy );
+	for (int r = 0; r < region_count; ++r) {
+		cx[r] = centroids.at<double>(r + 1, 0);
+		cy[r] = centroids.at<double>(r + 1, 1);
 	}
 
 	// remove staff lines from area
@@ -162,12 +155,16 @@ void CalcWinFeatures(const cv::Mat &image, float *features, int position_v, int 
 		}
 	}
 
-	// area (without lines)
+	// area (without lines) — recompute directly since the label buffer
+	// has been mutated by the staff-line clearing above.
 	int* area = (int*)malloc(region_count*sizeof(int));
 	memset( area, 0, region_count*sizeof(int));
 	{
-		ImView regions_view(imRegions, IM_GRAY);
-		imAnalyzeMeasureArea( regions_view, area, 1 );
+		const int count = image.rows * image.cols;
+		const imushort *regs = imRegions.ptr<imushort>();
+		for (int i = 0; i < count; ++i) {
+			if (regs[i]) area[regs[i] - 1]++;
+		}
 	}
 
 	int tot_area = 0;
@@ -212,29 +209,22 @@ void CalcWinFeatures(const cv::Mat &image, float *features, int position_v, int 
 
 	// get biggest black
 	{
-		ImView src_view(image, IM_BINARY);
-		ImView dst_view(imRegions, IM_GRAY);
-		imAnalyzeFindRegions ( src_view, dst_view, 8, 1, &region_count );
-	}
+		cv::Mat fg_stats, fg_centroids;
+		int fg_n = cv::connectedComponentsWithStats(image, imRegions, fg_stats,
+		                                             fg_centroids, 8, CV_16U);
+		region_count = fg_n - 1;
 
-	if (region_count != 0)
-	{
-		int* forground = (int*)malloc(region_count*sizeof(int));
-		memset( forground, 0, region_count*sizeof(int));
+		if (region_count != 0)
 		{
-			ImView regions_view(imRegions, IM_GRAY);
-			imAnalyzeMeasureArea( regions_view, forground , 1);
+			int max_forground = 0;
+			for (int r = 0; r < region_count; ++r) {
+				int a = fg_stats.at<int>(r + 1, cv::CC_STAT_AREA);
+				if (a > max_forground) max_forground = a;
+			}
+			(void)max_forground;
+			// plus grand noir
+			//features[4] = float(max_forground) /(image.cols * image.rows); // 10
 		}
-
-		int max_forground = 0;
-		for (i = 0; i < region_count; i++)
-		{
-			if ( forground[i] > max_forground )
-				max_forground = forground[i];
-		}
-		free(forground);
-		// plus grand noir
-		//features[4] = float(max_forground) /(image.cols * image.rows); // 10
 	}
 
 
@@ -242,29 +232,21 @@ void CalcWinFeatures(const cv::Mat &image, float *features, int position_v, int 
 	cv::Mat negate;
 	cv::bitwise_not( image, negate );
 	{
-		ImView src_view(negate, IM_BINARY);
-		ImView dst_view(imRegions, IM_GRAY);
-		imAnalyzeFindRegions ( src_view, dst_view, 8, 1, &region_count );
-	}
+		cv::Mat bg_stats, bg_centroids;
+		int bg_n = cv::connectedComponentsWithStats(negate, imRegions, bg_stats,
+		                                             bg_centroids, 8, CV_16U);
+		region_count = bg_n - 1;
 
-	if (region_count != 0)
-	{
-		int* background = (int*)malloc(region_count*sizeof(int));
-		memset( background, 0, region_count*sizeof(int));
+		if (region_count != 0)
 		{
-			ImView regions_view(imRegions, IM_GRAY);
-			imAnalyzeMeasureArea( regions_view, background, 1 );
+			int min_background = image.cols * image.rows;
+			for (int r = 0; r < region_count; ++r) {
+				int a = bg_stats.at<int>(r + 1, cv::CC_STAT_AREA);
+				if (a < min_background) min_background = a;
+			}
+			// smallest white
+			features[5] = float(min_background) / (image.cols * image.rows);
 		}
-
-		int min_background = image.cols * image.rows;
-		for (i = 0; i < region_count; i++)
-		{
-			if ( background[i] < min_background )
-				min_background = background[i];
-		}
-		free(background);
-		// smallest white
-		features[5] = float(min_background) / (image.cols * image.rows);
 	}
 }
 
