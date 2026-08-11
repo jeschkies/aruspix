@@ -5,11 +5,12 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Dependencies are provided by Conan; see conanfile.py + recipes/im/.
+# Dependencies are provided by Conan; see conanfile.py.
 # Configure with `cmake --preset conan-release` after `conan install`.
-find_package(im REQUIRED)
+find_package(OpenCV REQUIRED)
 find_package(wxWidgets REQUIRED)
 find_package(LibXml2 REQUIRED)
+find_package(doctest REQUIRED)
 
 set(aruspixSources
     src/app/axabout_wdr.cpp
@@ -41,10 +42,10 @@ set(aruspixSources
     src/edition/edtfile.cpp
     src/edition/edt_wdr_inc.cpp
 
+    src/im/binarize.cpp
     src/im/imbrink3classes.cpp
     src/im/imbrink.cpp
     src/im/imext.cpp
-    src/im/imkmeans.cpp
     src/im/imoperator.cpp
     src/im/impage.cpp
     src/im/imregister.cpp
@@ -166,7 +167,7 @@ else()
 endif()
 
 target_link_libraries(aruspix PRIVATE
-    im::im
+    opencv::opencv
     wxWidgets::wxWidgets
     LibXml2::LibXml2
 )
@@ -178,23 +179,75 @@ elseif(APPLE)
 elseif(WIN32)
     # rpcrt4 provides UuidCreate.
     target_link_libraries(aruspix PRIVATE rpcrt4)
-    # IM's upstream prebuilt im.lib statically embeds libtiff (and
-    # libpng/libjpeg/zlib) — those symbols then collide with the
-    # tiff/png/jpeg/zlib that wxWidgets pulls in transitively from
-    # Conan. /FORCE:MULTIPLE lets the linker pick the first definition;
-    # /IGNORE:4006 silences the resulting warning. The duplicates are
-    # the same upstream code (libtiff 4.x etc.) so binding to either
-    # copy is safe.
-    target_link_options(aruspix PRIVATE /FORCE:MULTIPLE /IGNORE:4006 /IGNORE:4088)
 
-    # fftw is built as a DLL on Windows (see conanfile.py) so IM's
-    # im_fftw3.lib imports resolve. Copy every runtime DLL the aruspix
-    # target depends on (fftw3f.dll, and anything else Conan exposes as
-    # SHARED) into the output directory so the exe can find them at
-    # launch without needing PATH tweaks.
+    # Copy any runtime DLLs into the output directory so the exe can
+    # find them at launch without needing PATH tweaks. When the DLL
+    # list is empty (Conan's all-static build), cmake -E
+    # copy_if_different fails on a destination-only invocation — dispatch
+    # via a small script so we can no-op cleanly in that case.
     add_custom_command(TARGET aruspix POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_RUNTIME_DLLS:aruspix> $<TARGET_FILE_DIR:aruspix>
-        COMMAND_EXPAND_LISTS
+        COMMAND ${CMAKE_COMMAND}
+                "-DDLLS=$<TARGET_RUNTIME_DLLS:aruspix>"
+                "-DDEST=$<TARGET_FILE_DIR:aruspix>"
+                -P "${CMAKE_SOURCE_DIR}/cmake/copy_runtime_dlls.cmake"
     )
 endif()
+
+# ---------------------------------------------------------------------------
+# Tests
+#
+# A separate target that exercises the wx-free leaf functions in src/im/
+# (imext.cpp, imbrink.cpp, imbrink3classes.cpp) via their ax:: interfaces.
+# The wx-coupled wrapper classes (ImPage, ImStaff, ImRegister, ImOperator)
+# are intentionally not covered here — they need real-image fixtures and
+# belong in an integration-test target.
+# ---------------------------------------------------------------------------
+enable_testing()
+
+add_executable(aruspix_tests
+    src/im/binarize.cpp
+    src/im/imext.cpp
+    src/im/imbrink.cpp
+    src/im/imbrink3classes.cpp
+
+    tests/test_main.cpp
+    tests/test_imext_helpers.cpp
+    tests/test_binarize.cpp
+    tests/test_binarize_goldens.cpp
+    tests/test_image_ops.cpp
+)
+
+target_include_directories(aruspix_tests PRIVATE src/im)
+
+# Point the goldens test at the fixtures directory regardless of the
+# working directory ctest ends up in.
+target_compile_definitions(aruspix_tests PRIVATE
+    AX_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures"
+)
+
+target_link_libraries(aruspix_tests PRIVATE
+    opencv::opencv
+    doctest::doctest
+)
+
+add_test(NAME aruspix_tests COMMAND aruspix_tests)
+
+# ---------------------------------------------------------------------------
+# Tools
+#
+# dump_binarize: one-shot fixture generator. Runs ax::binarize_and_clean
+# on a JPG and writes a PNG + FNV-1a-64 hash. A near-twin on master
+# runs the IM-based algorithm and produces the same-format output so
+# we can compare byte-for-byte between the two branches.
+# ---------------------------------------------------------------------------
+add_executable(dump_binarize
+    tools/dump_binarize.cpp
+    src/im/binarize.cpp
+    src/im/imext.cpp
+    src/im/imbrink.cpp
+    src/im/imbrink3classes.cpp
+)
+target_include_directories(dump_binarize PRIVATE src)
+target_link_libraries(dump_binarize PRIVATE
+    opencv::opencv
+)

@@ -71,12 +71,8 @@ AxProgressDlg::AxProgressDlg( wxWindow *parent, wxWindowID id, const wxString &t
     delete wxLog::SetActiveTarget( logWindow );
 #endif
 
-        // counter callback
-    imCounterSetCallback( this, imDlgCounter );
+    m_counter = -1;
 
-    m_counter = imCounterBegin( title.c_str() );
-    imCounterTotal( m_counter, 1, title.c_str() );
-	
 	AxProgressDlg::s_instance_existing = true;
 	
 	m_parent->Disable();
@@ -89,10 +85,8 @@ AxProgressDlg::AxProgressDlg()
 AxProgressDlg::~AxProgressDlg()
 {
     delete wxLog::SetActiveTarget(NULL);
-    // counter callback
-    imCounterSetCallback(NULL, NULL);
 
-	wxASSERT_MSG( AxProgressDlg::s_instance_existing , "Single instance checker should be true" );	
+	wxASSERT_MSG( AxProgressDlg::s_instance_existing , "Single instance checker should be true" );
 	AxProgressDlg::s_instance_existing = false;
 	m_parent->Enable( true );
 	m_parent->SetFocus( );
@@ -118,13 +112,15 @@ void AxProgressDlg::AxShowModal( bool failed )
 
 void AxProgressDlg::SuspendCounter()
 {
-    imCounterSetCallback(NULL, NULL);
+    // No-op stub — kept so the wx-coupled call sites in im/imregister.cpp
+    // continue to compile. Progress-bar updates driven by IM counter
+    // callbacks were removed when IM was retired.
 }
 
 
 void AxProgressDlg::ReactiveCounter()
 {
-    imCounterSetCallback( this, imDlgCounter );
+    // No-op stub — see SuspendCounter().
 }
 
 /*
@@ -282,63 +278,7 @@ void AxProgressDlg::OnCancel(wxCommandEvent &event )
     {
         wxLogMessage(_("Wait ...") );
         m_canceled = true;
-        if ( m_counter != -1 )
-        {
-            imCounterEnd( m_counter );
-            m_counter = -1;
-        }
+        m_counter = -1;
     }
-}
-
-
-int imDlgCounter(int counter, void* user_data, const char* text, int progress)
-{
-   AxProgressDlg *dlg = NULL;
-   if ( user_data && ((wxObject*)user_data)->IsKindOf( CLASSINFO( AxProgressDlg ) ) )
-       dlg = (AxProgressDlg*)user_data;
-	   
-	if ( dlg && dlg->GetCounter() != counter )
-		return 1;
-
-
-    // start of a sequence
-    if (progress == -1)
-    {
-        if (dlg)
-        {
-            //dlg->GetTxMsgOperation()->SetLabel( text );
-            dlg->GetGaugeOperation()->SetValue( 0 );
-            wxGetApp().Yield( );
-        }
-        return 1;
-    }
-
-    //if (text && dlg)
-    //    dlg->GetTxMsg3Progress()->SetLabel( text );
-
-    /* end of sequence */
-    if (progress == 1001)
-    {
-        //wxLogMessage("1001");
-        dlg->SetCanceled( true );
-        dlg->GetCancel()->SetLabel( _("Close") );
-        dlg->GetGaugeOperation()->SetValue( 100 );
-        dlg->GetGaugeJob()->SetValue( 100 );
-        dlg->GetGaugeBatch()->SetValue( 100 );
-        //wxGetApp().Yield( );
-        return 1;
-    }
-
-    /* Now we must be between 0-1000 */
-    if (dlg)
-    {
-        if ( dlg->HasToBeUpdated() )
-        {
-            dlg->GetGaugeOperation()->SetValue( progress / 10 );
-			dlg->UpdateJobBar( );
-            wxGetApp().Yield( );
-        }
-    }
-    return 1;
 }
 

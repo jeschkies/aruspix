@@ -207,12 +207,9 @@ AxFrame::AxFrame( wxWindow *parent, wxWindowID id, const wxString &title,
 
 
     RealizeToolbar();
-    
+
     // load config
     this->LoadConfig();
-
-    // counter callback
-    imCounterSetCallback(NULL, NULL);
 }
 
 AxFrame::~AxFrame()

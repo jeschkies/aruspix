@@ -9,14 +9,7 @@
 using std::min;
 using std::max;
 
-// IMLIB
-#include <im.h>
-#include <im_image.h>
-#include <im_convert.h>
-#include <im_process.h>
-#include <im_util.h>
-#include <im_binfile.h>
-#include <im_palette.h>
+#include <opencv2/imgproc.hpp>
 
 // For compilers that support precompilation, includes "wx/wx.h".
 #include "wx/wxprec.h"
@@ -94,64 +87,30 @@ bool AxImage::LoadFile(const wxString& name, long type, int index)
 {
 	bool res = wxImage::LoadFile( name, (wxBitmapType)type, index);
 
-	if (AxImage::s_reduceBigImages 
+	if (AxImage::s_reduceBigImages
 		&& (max(this->GetWidth(),this->GetHeight()) > AxImage::s_imageSizeToReduce))
 	{
-		imImage *imTmp1 = GetImImage(this, IM_RGB);
+		// Downsize by repeated 2x2-area reduction, matching the old
+		// imProcessCrop (drop the last odd row/col) + imProcessReduceBy4
+		// loop. cv::resize with INTER_AREA is the OpenCV equivalent of
+		// ReduceBy4's box-filter downsample.
+		cv::Mat img = GetCvMat(this);
 		do
 		{
-			int removeX = imTmp1->width % 2;
-			int removeY = imTmp1->height % 2;
-			if (removeX || removeY) // controler si width ou height sont impaires -> si oui, crop image
+			int removeX = img.cols % 2;
+			int removeY = img.rows % 2;
+			if (removeX || removeY) // odd dimensions: crop the last row/col
 			{
-				imImage *imTmp2 = imImageCreate(imTmp1->width - removeX,imTmp1->height - removeY,imTmp1->color_space, imTmp1->data_type);
-				imProcessCrop(imTmp1,imTmp2, 0, 0);
-				imImageDestroy(imTmp1);
-				imTmp1 = imTmp2;
+				img = img(cv::Rect(0, 0, img.cols - removeX, img.rows - removeY)).clone();
 			}
-			imImage *imTmp2 = imImageCreate(imTmp1->width/2,imTmp1->height/2,imTmp1->color_space, imTmp1->data_type);
-			imProcessReduceBy4(imTmp1,imTmp2);
-			imImageDestroy(imTmp1);
-			imTmp1 = imTmp2;
-		} while (max(imTmp1->width, imTmp1->height) > AxImage::s_imageSizeToReduce);
-		SetImImage(imTmp1,this);
-		imImageDestroy(imTmp1);
+			cv::Mat next;
+			cv::resize(img, next, cv::Size(img.cols / 2, img.rows / 2), 0, 0, cv::INTER_AREA);
+			img = next;
+		} while (max(img.cols, img.rows) > AxImage::s_imageSizeToReduce);
+		SetCvMat(this, img);
 	}
 	//wxLogMessage("%d %d", this->GetWidth(), this->GetHeight());
 	return res;
-	
-	/*
-
-	int error;
-	imFile* ifile = imFileOpen(name.c_str(), &error);
-	imImage* image = imFileLoadBitmap(ifile, index, &error);
-	imFileClose(ifile);
-	if (!image)
-		return false;
-
-	if ( AxImage::s_reduceBigImages )
-	{
-		while ( max( image->width, image->height ) > AxImage::s_imageSizeToReduce )	
-		{
-			int removeX = image->width % 2;
-			int removeY = image->height % 2;
-			if (removeX || removeY) // controler si width ou height sont impaires -> si oui, crop image
-			{
-				imImage *imTmp = imImageCreate(image->width - removeX,image->height - removeY,image->color_space, image->data_type);
-				imProcessCrop(image,imTmp, 0, 0);
-				imImageDestroy(image);
-				image = imTmp;
-			}
-			imImage *imTmp = imImageCreate(image->width/2,image->height/2,image->color_space, image->data_type);
-			imProcessReduceBy4(image,imTmp);
-			imImageDestroy(image);
-			image = imTmp;
-		};
-	}
-	//wxLogMessage("%d %d", this->GetWidth(), this->GetHeight());
-	SetImImage(image,this);
-	imImageDestroy(image);
-	return true;*/
 }
 
 
@@ -195,9 +154,13 @@ AxImage AxImage::ScaleInterpolate(int newWidth, int newHeight, int interpolation
 void AxImage::ShrinkDataInt(unsigned char *pInBuff, int wWidth, int wHeight,
                    unsigned char *pOutBuff, int wNewWidth, int wNewHeight)
 {
+	// pdwBuff accumulates 32-bit sums per channel; we then pick the
+	// most-significant byte to reconstruct an 8-bit RGB pixel. On
+	// little-endian hosts that's byte index 3; on big-endian it's 0.
 	int pixelToPickUp = 3;
-	if ( imBinCPUByteOrder() == IM_BIGENDIAN )
-		pixelToPickUp = 0;
+#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+	pixelToPickUp = 0;
+#endif
 
 
 	unsigned char  *pLine = pInBuff, *pPix;
@@ -337,153 +300,55 @@ void AxImage::ShrinkDataInt(unsigned char *pInBuff, int wWidth, int wHeight,
 }*/
 
 
-_imImage* GetImImage(const AxImage *img, const int color_space, const int data_type)
+cv::Mat GetCvMat(const AxImage *img)
 {
-	if (!img) return NULL;
+	if (!img || !img->IsOk()) return cv::Mat();
 
-
-	//imImage* imTmp1 = imImageCreate(img->GetWidth(), img->GetHeight(), (IM_RGB | IM_PACKED ) , IM_BYTE);
-	imImage* imTmp1 = imImageCreate(img->GetWidth(), img->GetHeight(), ( IM_RGB ) , IM_BYTE );
-	memcpy(imTmp1->data[0],img->GetData(),img->GetWidth() * img->GetHeight() * 3);
-	//imImageCopyData(im,imTmp1);
-
-	if (!imColorModeIsPacked(color_space))
-	{
-		imImage* imTmp2 = imImageCreate(imTmp1->width, imTmp1->height,( IM_RGB ), IM_BYTE);
-		imConvertPacking(imTmp1->data[0],imTmp2->data[0],imTmp1->width,imTmp1->height,imTmp1->depth,imTmp2->depth,imTmp1->data_type,1);
-		imImageDestroy(imTmp1);
-		imTmp1 = imTmp2;
-	}
-
-	if (data_type != IM_BYTE)
-	{
-		imImage* imTmp2 = imImageCreate(imTmp1->width, imTmp1->height, ( IM_RGB ) , data_type);
-		imConvertDataType(imTmp1,imTmp2,0,0,0,0);
-		imImageDestroy(imTmp1);
-		imTmp1 = imTmp2;
-	}
-
-	if (!imColorModeMatch(color_space,IM_RGB))
-	{
-		imImage* imTmp2 = imImageCreate(imTmp1->width, imTmp1->height, color_space, imTmp1->data_type);
-		imConvertColorSpace(imTmp1,imTmp2);
-		imImageDestroy(imTmp1);
-		imTmp1 = imTmp2;
-	}
-    
-    // flip it
-    imImage* imTmp2 = imImageClone( imTmp1 );
-    imProcessFlip(imTmp1, imTmp2);
-    imImageDestroy(imTmp1);
-    imTmp1 = imTmp2;
-
-	return imTmp1;
+	// wxImage stores 3-byte interleaved R,G,B with top-left origin.
+	// Wrap that buffer as a CV_8UC3 header, convert to BGR (OpenCV
+	// convention), then vertically flip to match the old GetImImage
+	// contract (IM_RGB image with bottom-left origin).
+	cv::Mat rgb(img->GetHeight(), img->GetWidth(), CV_8UC3, img->GetData());
+	cv::Mat bgr;
+	cv::cvtColor(rgb, bgr, cv::COLOR_RGB2BGR);
+	cv::flip(bgr, bgr, 0);
+	return bgr;
 }
 
-void SetImImage(_imImage *im, AxImage *img)
+void SetCvMat(AxImage *img, const cv::Mat &mat)
 {
-	if (!im || !img) return;
+	if (!img || mat.empty()) return;
 
-	if ( !img->Ok() || (im->width != img->GetWidth()) || (im->height != img->GetHeight()) )
+	if (!img->IsOk() || (mat.cols != img->GetWidth()) || (mat.rows != img->GetHeight()))
 	{
 		img->Destroy();
-		img->Create(im->width,im->height);
+		img->Create(mat.cols, mat.rows);
 	}
-	
-	/*img->Create(im->width,im->height);
-	unsigned char *dest = img->GetData();
-	unsigned char *src = (unsigned char *)im->data[0];
-	for (int i=0; i < img->GetWidth() * img->GetHeight(); dest+=3, src++, i++)
-	{
-		memcpy(dest, src, 1);
-		memcpy(dest+1, src, 1);
-		memcpy(dest+2, src, 1);
-	}
-	return; */
 
-	/*imImage* imTmp1 = imImageClone(m_imPtr);
-	imImageCopyData(m_imPtr,imTmp1);
-	if ((imTmp1->color_space == IM_GRAY) || (imTmp1->color_space == IM_BINARY))
+	// Vertical flip to reverse the bottom-left origin used by the pre-cv
+	// pipeline (matches the imProcessFlip that SetImImage performed).
+	cv::Mat flipped;
+	cv::flip(mat, flipped, 0);
+
+	cv::Mat rgb;
+	if (flipped.type() == CV_8UC1)
 	{
-		wxImage image(imTmp1->width,imTmp1->height);
-		unsigned char *image1Ptr = image.GetData();
-		unsigned char *image2Ptr = (unsigned char *)imTmp1->data[0];
-		unsigned char pixel[3];
-		for (int i=0; i < image.GetWidth() * image.GetHeight(); image1Ptr+=3, image2Ptr++, i++)
-		{
-			memcpy(image1Ptr, image2Ptr, 1);
-			memcpy(image1Ptr+1, image2Ptr, 1);
-			memcpy(image1Ptr+2, image2Ptr, 1);
-		}
-		wxBitmap bmp(image);
-		imImageDestroy(imTmp1);
-		return bmp;
+		// Broadcast grayscale to R=G=B for wxImage.
+		cv::cvtColor(flipped, rgb, cv::COLOR_GRAY2RGB);
+	}
+	else if (flipped.type() == CV_8UC3)
+	{
+		// Assume BGR (OpenCV convention) — swap to RGB for wxImage.
+		cv::cvtColor(flipped, rgb, cv::COLOR_BGR2RGB);
 	}
 	else
 	{
-		if (imTmp1->color_space != IM_RGB)
-		{
-			imImage* imTmp2 = imImageCreate(imTmp1->width, imTmp1->height, IM_RGB, imTmp1->data_type);
-			imConvertColorSpace(imTmp1,imTmp2);
-			imImageDestroy(imTmp1);
-			imTmp1 = imTmp2;
-		}
-
-		if (imTmp1->data_type != IM_BYTE)
-		{
-			imImage* imTmp2 = imImageCreate(imTmp1->width, imTmp1->height, IM_RGB, IM_BYTE);
-			imConvertDataType(imTmp1,imTmp2,0,0,0,0);
-			imImageDestroy(imTmp1);
-			imTmp1 = imTmp2;
-		}
-
-		if (imTmp1->data_type != IM_PACKED) Ce doit pas etre juste ???????
-		{
-			imImage* imTmp2 = imImageCreate(imTmp1->width, imTmp1->height, (IM_RGB | IM_PACKED ), IM_INT);
-			imConvertPacking(imTmp1->data[0],imTmp2->data[0],imTmp1->width,imTmp1->height,imTmp1->depth,imTmp1->data_type,0);
-			imImageDestroy(imTmp1);
-			imTmp1 = imTmp2;
-		}
-		
-		wxImage image(imTmp1->width,imTmp1->height,(unsigned char *)imTmp1->data[0],true);
-		wxBitmap bmp(image);
-		imImageDestroy(imTmp1);
-		return bmp;
-	}*/
-
-
-    // flip it
-	imImage* imTmp1 = imImageClone(im);
-    imProcessFlip(im, imTmp1);
-
-	if (!imColorModeMatch(imTmp1->color_space,IM_RGB))
-	{
-		imImage* imTmp2 = imImageCreate(imTmp1->width, imTmp1->height, IM_RGB, imTmp1->data_type);
-		imConvertColorSpace(imTmp1,imTmp2);
-		imImageDestroy(imTmp1);
-		imTmp1 = imTmp2;
+		wxFAIL_MSG("SetCvMat: expected CV_8UC1 or CV_8UC3");
+		return;
 	}
 
-	if (imTmp1->data_type != IM_BYTE)
-	{
-		imImage* imTmp2 = imImageCreate(imTmp1->width, imTmp1->height, IM_RGB, IM_BYTE);
-		imConvertDataType(imTmp1,imTmp2,0,0,0,0);
-		imImageDestroy(imTmp1);
-		imTmp1 = imTmp2;
-	}
-
-	if (!imColorModeIsPacked(imTmp1->color_space))
-	{
-		//imImage* imTmp2 = imImageCreate(imTmp1->width, imTmp1->height, (IM_RGB | IM_PACKED ), IM_INT);
-		imImage* imTmp2 = imImageCreate(imTmp1->width, imTmp1->height, ( IM_RGB ), IM_INT);
-		imConvertPacking(imTmp1->data[0],imTmp2->data[0],imTmp1->width,imTmp1->height,imTmp1->depth,imTmp2->depth,imTmp1->data_type,0);
-		imImageDestroy(imTmp1);
-		imTmp1 = imTmp2;
-	}
-
-	memcpy(img->GetData(),(unsigned char *)imTmp1->data[0],imTmp1->width * imTmp1->height * 3);
-	imImageDestroy(imTmp1);
-	return;
+	memcpy(img->GetData(), rgb.data,
+	       (size_t)rgb.cols * rgb.rows * 3);
 }
 
 

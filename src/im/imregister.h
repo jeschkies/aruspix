@@ -12,6 +12,8 @@
     #include "wx/wx.h"
 #endif
 
+#include <opencv2/core.hpp>
+
 #include "im/imoperator.h"
 
 class ImPage;
@@ -46,12 +48,12 @@ private:
 
 
 public:
-    _imImage *m_src1; // original1 but processed image (resized, scaled, ...)
-	_imImage *m_src2; // original2 but processed image (resized, scaled, ...)
-	_imImage *m_result; // result image
+    cv::Mat m_src1; // original1 but processed image (resized, scaled, ...)
+	cv::Mat m_src2; // original2 but processed image (resized, scaled, ...)
+	cv::Mat m_result; // result image
 	// additional images for processing
-	_imImage *m_im1;
-    _imImage *m_im2;
+	cv::Mat m_im1;
+    cv::Mat m_im2;
 	imPoint m_reg_points1[4];
     imPoint m_reg_points2[4];
 	bool *m_isModified;

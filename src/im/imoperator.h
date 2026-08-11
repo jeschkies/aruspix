@@ -15,19 +15,9 @@
 #include "wx/ffile.h"
 #include "wx/file.h"
 
-#include "app/axprogressdlg.h"
-//struct _imImage;
+#include <opencv2/core.hpp>
 
-// IMLIB
-#include <im.h>
-#include <im_counter.h>
-#include <im_image.h>
-#include <im_convert.h>
-#include <im_process.h>
-#include <im_util.h>
-#include <im_binfile.h>
-#include <im_math_op.h>
-#include <im_palette.h>
+#include "app/axprogressdlg.h"
 
 #include "imext.h"
 
@@ -72,7 +62,6 @@ enum
 };
 
 
-
 //----------------------------------------------------------------------------
 // ImOperator
 //----------------------------------------------------------------------------
@@ -85,33 +74,35 @@ public:
     // constructors and destructors
 	ImOperator();
     virtual ~ImOperator();
-    
+
     int GetError( ) { return m_error; }
 	void SetProgressDlg( AxProgressDlg *dlg );
-    void SetMapImage( _imImage *image );
+    void SetMapImage( const cv::Mat &image );
     //wxString GetShortName() { return m_shortname; }
-    
+
 protected:
     void MedianFilter( int values[], int size, int filter_size, int *avg_ptr = NULL);
-    void PruneElementsZone( _imImage *image, int min_threshold, int max_threshold, int type = IM_PRUNE_CLEAR_HEIGHT );
-    void MoveElements( _imImage *src, _imImage *dest, int bounding_boxes[],
+    void PruneElementsZone( cv::Mat &image, int min_threshold, int max_threshold, int type = IM_PRUNE_CLEAR_HEIGHT );
+    void MoveElements( cv::Mat &src, cv::Mat &dest, int bounding_boxes[],
         int count, int margins[4], int factor = 1 );
-    void DistByCorrelation( _imImage *image1, _imImage *image2,
+    void DistByCorrelation( const cv::Mat &image1, const cv::Mat &image2,
                                 imSize window, int *decalageX, int *decalageY, int *maxCorr );
-    //void DistByCorrelationFFT(const _imImage *image1, const _imImage *image2,
-    //                            imSize window, int *decalageX, int *decalageY);
-    
+
 	// Memory managment methods
     virtual bool Terminate( int code = 0, ... );
-    bool GetImagePlane( _imImage **image , int plane = 0, int factor = 1 );
-    bool GetImage( _imImage **image, int factor = 1 , int binary_method = -1, bool median_filtering = false );
-    bool Read( wxString file, _imImage **image, int index );
-    bool Write( wxString file, _imImage **image );
-    bool WriteAsMAP( wxString file, _imImage **image );
-	bool ExtractPlane( _imImage **image, _imImage **extrated_plane, int plane_number  );
-	bool ConvertToMAP( _imImage **image );
-    void SwapImages( _imImage **image1, _imImage **image2 );
-    void ImageDestroy( _imImage **image );
+    bool GetImagePlane( cv::Mat &image, int plane = 0, int factor = 1 );
+    bool GetImage( cv::Mat &image, int factor = 1 , int binary_method = -1, bool median_filtering = false );
+    bool Read( wxString file, cv::Mat &image, int index );
+    bool Write( wxString file, const cv::Mat &image );
+    bool WriteAsMAP( wxString file, cv::Mat &image );
+	bool ExtractPlane( cv::Mat &image, cv::Mat &extrated_plane, int plane_number  );
+	bool ConvertToMAP( cv::Mat &image );
+
+    // cv::Mat-native versions of the historical IM helpers. Kept as methods
+    // (rather than free functions) to minimise call-site churn during the
+    // storage swap.
+    static void SwapImages( cv::Mat &a, cv::Mat &b ) { std::swap(a, b); }
+    static void ImageDestroy( cv::Mat &image ) { image = cv::Mat(); }
 
     // deg2rad
     inline double deg2rad( double deg ) { return deg * AX_PI / 180.0; }
@@ -120,13 +111,16 @@ protected:
     AxProgressDlg *m_progressDlg;
     int m_error;
 
-    _imImage *m_opImMap;
-    _imImage *m_opIm;
-    _imImage *m_opImMain;
-    _imImage *m_opImTmp1;
-    _imImage *m_opImTmp2;
-    _imImage *m_opImMask;
-    _imImage *m_opImAlign;
+    // Single-channel 8-bit buffers. See project_im_to_opencv.md:
+    // even IM_MAP-encoded classification images are single-plane 8-bit
+    // bitmasks; the palette metadata is tracked separately.
+    cv::Mat m_opImMap;
+    cv::Mat m_opIm;
+    cv::Mat m_opImMain;
+    cv::Mat m_opImTmp1;
+    cv::Mat m_opImTmp2;
+    cv::Mat m_opImMask;
+    cv::Mat m_opImAlign;
 
     int *m_opHist;
     int *m_opLines1;
@@ -134,11 +128,11 @@ protected:
     int *m_opCols1;
 
 
-public: 
+public:
 	// static binarization variable
-	static int s_pre_image_binarization_method; 
+	static int s_pre_image_binarization_method;
 	int *m_pre_image_binarization_methodPtr;
-	
+
 	// DEBUG variables
     wxString m_inputfile; // utilise dans la methode Read
 };
@@ -153,13 +147,13 @@ class imSize
 public:
     // members are public for compatibility, don't use them directly.
     int x, y;
-    
+
     // constructors
     imSize() : x(0), y(0) { }
     imSize(int xx, int yy) : x(xx), y(yy) { }
-    
+
     // no copy ctor or assignment operator - the defaults are ok
-    
+
     imSize& operator+=(const imSize& sz) { x += sz.x; y += sz.y; return *this; }
     imSize& operator-=(const imSize& sz) { x -= sz.x; y -= sz.y; return *this; }
     imSize& operator/=(int i) { x /= i; y /= i; return *this; }
@@ -172,7 +166,7 @@ public:
     imSize& operator*=(unsigned long i) { x *= i; y *= i; return *this; }
     imSize& operator/=(double i) { x = int(x/i); y = int(y/i); return *this; }
     imSize& operator*=(double i) { x = int(x*i); y = int(y*i); return *this; }
-    
+
     void IncTo(const imSize& sz)
     { if ( sz.x > x ) x = sz.x; if ( sz.y > y ) y = sz.y; }
     void DecTo(const imSize& sz)
@@ -184,31 +178,31 @@ public:
         if ( sz.y != wxDefaultCoord && sz.y < y )
             y = sz.y;
     }
-    
+
     void IncBy(int dx, int dy) { x += dx; y += dy; }
     void IncBy(const imPoint& pt);
     void IncBy(const imSize& sz) { IncBy(sz.x, sz.y); }
     void IncBy(int d) { IncBy(d, d); }
-    
+
     void DecBy(int dx, int dy) { IncBy(-dx, -dy); }
     void DecBy(const imPoint& pt);
     void DecBy(const imSize& sz) { DecBy(sz.x, sz.y); }
     void DecBy(int d) { DecBy(d, d); }
-    
-    
+
+
     imSize& Scale(float xscale, float yscale)
     { x = (int)(x*xscale); y = (int)(y*yscale); return *this; }
-    
+
     // accessors
     void Set(int xx, int yy) { x = xx; y = yy; }
     void SetWidth(int w) { x = w; }
     void SetHeight(int h) { y = h; }
-    
+
     int GetWidth() const { return x; }
     int GetHeight() const { return y; }
-    
+
     bool IsFullySpecified() const { return x != wxDefaultCoord && y != wxDefaultCoord; }
-    
+
     // combine this size with the other one replacing the default (i.e. equal
     // to wxDefaultCoord) components of this object with those of the other
     void SetDefaults(const imSize& size)
@@ -218,7 +212,7 @@ public:
         if ( y == wxDefaultCoord )
             y = size.y;
     }
-    
+
     // compatibility
     int GetX() const { return x; }
     int GetY() const { return y; }
@@ -324,17 +318,17 @@ class imRealPoint
 public:
     double x;
     double y;
-    
+
     imRealPoint() : x(0.0), y(0.0) { }
     imRealPoint(double xx, double yy) : x(xx), y(yy) { }
     imRealPoint(const imPoint& pt);
-    
+
     // no copy ctor or assignment operator - the defaults are ok
-    
+
     //assignment operators
     imRealPoint& operator+=(const imRealPoint& p) { x += p.x; y += p.y; return *this; }
     imRealPoint& operator-=(const imRealPoint& p) { x -= p.x; y -= p.y; return *this; }
-    
+
     imRealPoint& operator+=(const imSize& s) { x += s.GetWidth(); y += s.GetHeight(); return *this; }
     imRealPoint& operator-=(const imSize& s) { x -= s.GetWidth(); y -= s.GetHeight(); return *this; }
 };
@@ -442,23 +436,23 @@ class imPoint
 {
 public:
     int x, y;
-    
+
     imPoint() : x(0), y(0) { }
     imPoint(int xx, int yy) : x(xx), y(yy) { }
     imPoint(const imRealPoint& pt) : x(int(pt.x)), y(int(pt.y)) { }
-    
+
     // no copy ctor or assignment operator - the defaults are ok
-    
+
     //assignment operators
     imPoint& operator+=(const imPoint& p) { x += p.x; y += p.y; return *this; }
     imPoint& operator-=(const imPoint& p) { x -= p.x; y -= p.y; return *this; }
-    
+
     imPoint& operator+=(const imSize& s) { x += s.GetWidth(); y += s.GetHeight(); return *this; }
     imPoint& operator-=(const imSize& s) { x -= s.GetWidth(); y -= s.GetHeight(); return *this; }
-    
+
     // check if both components are set/initialized
     bool IsFullySpecified() const { return x != wxDefaultCoord && y != wxDefaultCoord; }
-    
+
     // fill in the unset components with the values from the other point
     void SetDefaults(const imPoint& pt)
     {
@@ -587,7 +581,6 @@ inline imPoint operator*(double i, const imPoint& s)
 {
     return imPoint(int(s.x * i), int(s.y * i));
 }
-
 
 
 

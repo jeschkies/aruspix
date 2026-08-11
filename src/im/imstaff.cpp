@@ -16,6 +16,9 @@ using std::max;
 #include "wx/tokenzr.h"
 #include "wx/wfstream.h"
 
+#include <opencv2/imgproc.hpp>
+
+#include "analyze.h"
 #include "imstaff.h"
 #include "imstaffsegment.h"
 
@@ -56,17 +59,17 @@ enum
 #define LYRIC_FEATURES_COUNT 16
 
 // Feature extration fonction on one window
-void CalcWinFeatures(const imImage* image, float *features, int position_v, int height, int width )
+void CalcWinFeatures(const cv::Mat &image, float *features, int position_v, int height, int width )
 {
-	
+
 	if ( width > ( STAFF / 8 ) )
 	{
 		//wxLogDebug( "Staff width larger than half staff space" );
 		width = STAFF / 8;
 	}
-	
-	
-	// empiric adjustment		
+
+
+	// empiric adjustment
 	height -= width;
 
 	// valeurs par defaut
@@ -91,9 +94,11 @@ void CalcWinFeatures(const imImage* image, float *features, int position_v, int 
 	pos[5] = half_staff_height - height / 2 + position_v;
 	pos[6] = half_staff_height - height / 2 - height / 4 + position_v;
 	pos[7] = half_staff_height - height + position_v;
-	
-	imbyte *imBuf = (imbyte*)image->data[0];
-	
+
+	// image is a single-plane 8-bit buffer (see ImView / cv::Mat migration).
+	// Draw over it in place — the caller passes a scratch crop.
+	imbyte *imBuf = const_cast<imbyte*>(image.data);
+
 	int line_offset;
 	int l;
 	// completer les lignes
@@ -102,37 +107,38 @@ void CalcWinFeatures(const imImage* image, float *features, int position_v, int 
 		if ( ( pos[l] < 0 ) || ( pos[l] >= STAFF_HEIGHT ) )
 			continue;
 		line_offset = pos[l];
-		memset( imBuf + line_offset * image->width,
-			1, image->width );
+		memset( imBuf + line_offset * image.cols,
+			1, image.cols );
 	}
-	
+
 	//if ( imdebug )
 	//	imProcessInsert( imdebug, image, imdebug, stepdebug, 0 );
 
 	//global
-    imImage *imRegions = imImageCreate(image->width, image->height, IM_GRAY, IM_USHORT);
-    int region_count = 0;
-    imAnalyzeFindRegions ( image, imRegions, 8, 1, &region_count );
+	cv::Mat imRegions, stats, centroids;
+	int n = cv::connectedComponentsWithStats(image, imRegions, stats, centroids,
+	                                          8, CV_16U);
+	int region_count = n - 1; // exclude background label 0
 
 	if (region_count == 0)
 	{
-		imImageDestroy( imRegions );
 		return;
 	}
 
 	// euler (+-)
 	features[0] = 1.0 / (region_count + 1); // global
 
-	// centroid
+	// centroid — copy from CC stats.
 	double *cx = (double*)malloc(region_count*sizeof(double));
-	memset( cx, 0, region_count*sizeof(double));
 	double *cy = (double*)malloc(region_count*sizeof(double));
-	memset( cy, 0, region_count*sizeof(double));
-	imAnalyzeMeasureCentroid( imRegions, NULL, region_count, cx, cy );
+	for (int r = 0; r < region_count; ++r) {
+		cx[r] = centroids.at<double>(r + 1, 0);
+		cy[r] = centroids.at<double>(r + 1, 1);
+	}
 
 	// remove staff lines from area
-	imushort *regionsBuf = (imushort*)imRegions->data[0];
-	
+	imushort *regionsBuf = imRegions.ptr<imushort>(0);
+
 	if ( (width % 2) == 0 )
 		width++;
 	int m;
@@ -144,16 +150,23 @@ void CalcWinFeatures(const imImage* image, float *features, int position_v, int 
 			line_offset = pos[l] + m;
 			if ( ( line_offset < 0 ) || ( line_offset >= STAFF_HEIGHT ) )
 				continue;
-			memset( regionsBuf + line_offset * image->width,
-				0, sizeof( imushort ) * image->width );
+			memset( regionsBuf + line_offset * image.cols,
+				0, sizeof( imushort ) * image.cols );
 		}
-	}	
-	
-	// area (without lines)
+	}
+
+	// area (without lines) — recompute directly since the label buffer
+	// has been mutated by the staff-line clearing above.
 	int* area = (int*)malloc(region_count*sizeof(int));
 	memset( area, 0, region_count*sizeof(int));
-	imAnalyzeMeasureArea( imRegions, area, 1 );
-	
+	{
+		const int count = image.rows * image.cols;
+		const imushort *regs = imRegions.ptr<imushort>();
+		for (int i = 0; i < count; ++i) {
+			if (regs[i]) area[regs[i] - 1]++;
+		}
+	}
+
 	int tot_area = 0;
 	int max_area = 0;
 	double max_black_cy = 0.5;
@@ -166,10 +179,10 @@ void CalcWinFeatures(const imImage* image, float *features, int position_v, int 
 			max_black_cy = cy[i];
 		}
 	}
-	features[1] = (float)tot_area /(image->width * image->height);
+	features[1] = (float)tot_area /(image.cols * image.rows);
 	// plus grand noir
-	features[4] = float(max_area) /(image->width * image->height); // 01
-	
+	features[4] = float(max_area) /(image.cols * image.rows); // 01
+
 	// intersafflines cy
 	max_black_cy -= position_v;
 	int interline = height / 4;
@@ -187,58 +200,54 @@ void CalcWinFeatures(const imImage* image, float *features, int position_v, int 
 	}
 	if (tot_area)
 	{
-		features[2] = ((sum_cy / tot_area) - 1 - position_v) / image->height;
-		features[3] = ((sum_cx / tot_area) + 1) / image->width;
+		features[2] = ((sum_cy / tot_area) - 1 - position_v) / image.rows;
+		features[3] = ((sum_cx / tot_area) + 1) / image.cols;
 	}
 	free(cy);
 	free(cx);
 	free(area);
-	
+
 	// get biggest black
-    imAnalyzeFindRegions ( image, imRegions, 8, 1, &region_count );
-
-	if (region_count != 0)
 	{
-		int* forground = (int*)malloc(region_count*sizeof(int));
-		memset( forground, 0, region_count*sizeof(int));
-		imAnalyzeMeasureArea( imRegions, forground , 1);
+		cv::Mat fg_stats, fg_centroids;
+		int fg_n = cv::connectedComponentsWithStats(image, imRegions, fg_stats,
+		                                             fg_centroids, 8, CV_16U);
+		region_count = fg_n - 1;
 
-		int max_forground = 0;
-		for (i = 0; i < region_count; i++)
+		if (region_count != 0)
 		{
-			if ( forground[i] > max_forground )
-				max_forground = forground[i];
+			int max_forground = 0;
+			for (int r = 0; r < region_count; ++r) {
+				int a = fg_stats.at<int>(r + 1, cv::CC_STAT_AREA);
+				if (a > max_forground) max_forground = a;
+			}
+			(void)max_forground;
+			// plus grand noir
+			//features[4] = float(max_forground) /(image.cols * image.rows); // 10
 		}
-		free(forground);
-		// plus grand noir
-		//features[4] = float(max_forground) /(image->width * image->height); // 10
 	}
 
 
 	// get smallest white
-	imImage *negate = imImageClone( image );
-	imProcessNegative( image, negate );
-    imAnalyzeFindRegions ( negate, imRegions, 8, 1, &region_count );
+	cv::Mat negate;
+	cv::bitwise_not( image, negate );
+	{
+		cv::Mat bg_stats, bg_centroids;
+		int bg_n = cv::connectedComponentsWithStats(negate, imRegions, bg_stats,
+		                                             bg_centroids, 8, CV_16U);
+		region_count = bg_n - 1;
 
-	if (region_count != 0)
-	{	
-		int* background = (int*)malloc(region_count*sizeof(int));
-		memset( background, 0, region_count*sizeof(int));
-		imAnalyzeMeasureArea( imRegions, background, 1 );
-
-		int min_background = image->width * image->height;
-		for (i = 0; i < region_count; i++)
+		if (region_count != 0)
 		{
-			if ( background[i] < min_background )
-				min_background = background[i];
+			int min_background = image.cols * image.rows;
+			for (int r = 0; r < region_count; ++r) {
+				int a = bg_stats.at<int>(r + 1, cv::CC_STAT_AREA);
+				if (a < min_background) min_background = a;
+			}
+			// smallest white
+			features[5] = float(min_background) / (image.cols * image.rows);
 		}
-		free(background);
-		// smallest white
-		features[5] = float(min_background) / (image->width * image->height);
 	}
-
-	imImageDestroy( imRegions );
-	imImageDestroy( negate );
 }
 
 /*
@@ -246,11 +255,11 @@ Breaks the image into a 4x4 grid and calculates the forground pixel density in e
 	image: a slice of a cropped lyric image
 	pixel_density: a 16 dimensional vector 
  */
-bool CalcLyricWinFeatures(const imImage* image, float *pixel_density )
+bool CalcLyricWinFeatures(const cv::Mat &image, float *pixel_density )
 {
-	int height = image->height;
-	int width = image->width;
-	imbyte *buffer = (imbyte*)image->data[0];
+	int height = image.rows;
+	int width = image.cols;
+	const imbyte *buffer = image.data;
 	imbyte *tmp = (imbyte*)malloc( 4 * height * 4 * width );
 
 	int i, j, k, m;
@@ -533,22 +542,22 @@ wxArrayInt ImStaff::GetValuesToSave( int type )
 }
 
 
-bool ImStaff::GetImageFromPage( _imImage **image, _imImage *page, int y1, int y2 )
+bool ImStaff::GetImageFromPage( cv::Mat &image, const cv::Mat &page, int y1, int y2 )
 {
-	wxASSERT_MSG( !(*image), "Image pointer must be NULL");
+	wxASSERT_MSG( image.empty(), "Image must be empty");
 
 	if ( y2 == -1) {
-		*image = imImageCreate( m_x2 - m_x1, STAFF_HEIGHT, page->color_space, page->data_type); 
-		if ( !*image )
+		image = cv::Mat( STAFF_HEIGHT, m_x2 - m_x1, CV_8UC1 );
+		if ( image.empty() )
 			return this->Terminate( ERR_MEMORY );
 
-		imProcessCrop( page, *image, m_x1, y1);	
+		page(cv::Rect(m_x1, y1, image.cols, image.rows)).copyTo(image);
 	} else {
-		*image = imImageCreate( m_x2 - m_x1, y1 - y2, page->color_space, page->data_type);   
-		if ( !*image )
+		image = cv::Mat( y1 - y2, m_x2 - m_x1, CV_8UC1 );
+		if ( image.empty() )
 			return this->Terminate( ERR_MEMORY );
-	
-		imProcessCrop( page, *image, m_x1, y2);
+
+		page(cv::Rect(m_x1, y2, image.cols, image.rows)).copyTo(image);
 	}
     return true;
 }
@@ -585,58 +594,53 @@ int ImStaff::CalcEcart( int previous )
 
 bool ImStaff::GetStaffBorders( int threshold_in_percent, bool analyse_segments )
 {
-    wxASSERT_MSG( m_opImMap, wxT("MAP Image cannot be NULL") );
+    wxASSERT_MSG( !m_opImMap.empty(), wxT("MAP Image cannot be NULL") );
 
-    //if ( !GetImagePlane( &m_opIm, 0, SS_FACTOR_1 ) )
+    //if ( !GetImagePlane( m_opIm, 0, SS_FACTOR_1 ) )
     //  return false;
-    
+
     int i;
-    
-    if ( !GetImagePlane( &m_opIm ) )
+
+    if ( !GetImagePlane( m_opIm ) )
         return false;
 
-    m_opImTmp1 = imImageCreate( m_opIm->width / SS_FACTOR_1, m_opIm->height / SS_FACTOR_1, m_opIm->color_space, m_opIm->data_type);
-    if ( !m_opImTmp1 )
-            return this->Terminate( ERR_MEMORY );
-    imProcessResize( m_opIm, m_opImTmp1, 0);
-    SwapImages( &m_opIm, &m_opImTmp1 );
+    cv::resize(m_opIm, m_opImTmp1,
+               cv::Size(m_opIm.cols / SS_FACTOR_1, m_opIm.rows / SS_FACTOR_1),
+               0, 0, cv::INTER_NEAREST);
+    SwapImages( m_opIm, m_opImTmp1 );
 
-    // convovle
-    m_opImTmp1 = imImageClone( m_opIm );
-    if ( !m_opImTmp1 )
-            return this->Terminate( ERR_MEMORY );
-    imImage* kernel = imImageCreate( 3, 1, IM_GRAY, IM_INT);
-    imImageSetAttribute(kernel, "Description", IM_BYTE, -1, (void*)"Erode");
-    int* kernel_data = (int*)kernel->data[0];
-    for(i = 0; i < kernel->count; i++)
-        kernel_data[i] = 0;
-    //imProcessBinMorphClose( m_opIm, m_opImTmp1 , 3, 1);
-    imProcessBinMorphConvolve( m_opIm, m_opImTmp1, kernel, 0, 1);
-    imImageDestroy(kernel);
-    SwapImages( &m_opIm, &m_opImTmp1 );
+    // convovle: horizontal dilation (3x1 kernel)
+    cv::dilate(m_opIm, m_opImTmp1,
+               cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 1)));
+    SwapImages( m_opIm, m_opImTmp1 );
 
     // roi image : seulement 120 pixels de haut
-    m_opImTmp1 = imImageCreate( m_opIm->width, SS_STAFF_ROI_W / SS_FACTOR_1, m_opIm->color_space, m_opIm->data_type );
-    if ( !m_opImTmp1 )
+    m_opImTmp1 = cv::Mat( SS_STAFF_ROI_W / SS_FACTOR_1, m_opIm.cols, CV_8UC1 );
+    if ( m_opImTmp1.empty() )
         return this->Terminate( ERR_MEMORY );
-    imProcessCrop( m_opIm, m_opImTmp1, 0, ( STAFF_HEIGHT -  SS_STAFF_ROI_W) / ( 2 * SS_FACTOR_1 ) );
+    m_opIm(cv::Rect(0, ( STAFF_HEIGHT -  SS_STAFF_ROI_W) / ( 2 * SS_FACTOR_1 ),
+                    m_opImTmp1.cols, m_opImTmp1.rows)).copyTo(m_opImTmp1);
 
     // analyse de la projection verticale
     int f_width, avg;
-    m_opHist = new int[ m_opImTmp1->width ];
-    imAnalyzeProjectionV( m_opImTmp1, m_opHist );
+    m_opHist = new int[ m_opImTmp1.cols ];
+    {
+        std::vector<int> hist;
+        ax::projection_v( m_opImTmp1, hist );
+        std::copy(hist.begin(), hist.end(), m_opHist);
+    }
     f_width = 30 / SS_FACTOR_1; // 30 px
-    MedianFilter( m_opHist, m_opImTmp1->width , f_width, &avg );
-    m_med = median( m_opHist, m_opImTmp1->width, false );
+    MedianFilter( m_opHist, m_opImTmp1.cols , f_width, &avg );
+    m_med = median( m_opHist, m_opImTmp1.cols, false );
 
     // coupure de portee si en dessous de 25 % de la valeur medianne
     int x_staff = 0;
     bool staff = false;
     int staff_threshold = 0;
 	if ( (threshold_in_percent != 0) || (threshold_in_percent != 100) )
-		staff_threshold = m_med / (100  / threshold_in_percent); // threshold_in_percent		
+		staff_threshold = m_med / (100  / threshold_in_percent); // threshold_in_percent
     this->m_segments.Clear();
-    for ( i = 0; i < m_opImTmp1->width; i++ )
+    for ( i = 0; i < m_opImTmp1.cols; i++ )
     {
         if ( staff && (m_opHist[i] < staff_threshold ))
         {
@@ -654,7 +658,7 @@ bool ImStaff::GetStaffBorders( int threshold_in_percent, bool analyse_segments )
     }
     // check if last position not terminated
     if (staff)
-    {           
+    {
             ImStaffSegment segment;
             segment.m_x1 = x_staff * SS_FACTOR_1;
             segment.m_x2 = i * SS_FACTOR_1;
@@ -662,19 +666,20 @@ bool ImStaff::GetStaffBorders( int threshold_in_percent, bool analyse_segments )
     }
     delete m_opHist;
     m_opHist = NULL;
-    ImageDestroy( &m_opImTmp1 );
-	
+    ImageDestroy( m_opImTmp1 );
+
 	if ( !analyse_segments ) // analyse is used to find text in staves
-		return this->Terminate( ERR_NONE );	
+		return this->Terminate( ERR_NONE );
 
     int nb_segments = (int)m_segments.GetCount();
     for(i = 0; i < nb_segments; i++)
     {
-        m_opImTmp1 = imImageCreate( (m_segments[i].m_x2 - m_segments[i].m_x1) / SS_FACTOR_1,
-            m_opIm->height, m_opIm->color_space, m_opIm->data_type );
-        if ( !m_opImTmp1 )
+        m_opImTmp1 = cv::Mat( m_opIm.rows,
+            (m_segments[i].m_x2 - m_segments[i].m_x1) / SS_FACTOR_1, CV_8UC1 );
+        if ( m_opImTmp1.empty() )
             return this->Terminate( ERR_MEMORY );
-        imProcessCrop( m_opIm, m_opImTmp1, m_segments[i].m_x1 / SS_FACTOR_1, 0 );
+        m_opIm(cv::Rect(m_segments[i].m_x1 / SS_FACTOR_1, 0,
+                        m_opImTmp1.cols, m_opImTmp1.rows)).copyTo(m_opImTmp1);
 
         /*m_opImTmp1 = imImageCreate( (m_segments[i].m_x2 - m_segments[i].m_x1),
             m_opImMap->height, m_opImMap->color_space, m_opImMap->data_type );
@@ -685,7 +690,7 @@ bool ImStaff::GetStaffBorders( int threshold_in_percent, bool analyse_segments )
 		//m_segments[i].SetProgressDlg( m_progressDlg );
         m_segments[i].SetMapImage( m_opImTmp1 );
         m_segments[i].AnalyzeSegment();
-        ImageDestroy( &m_opImTmp1 );
+        ImageDestroy( m_opImTmp1 );
     }
 
     return this->Terminate( ERR_NONE );
@@ -785,14 +790,14 @@ void ImStaff::SaveImage(const int staff, wxArrayPtrVoid params )
     // param 0: image de la page
 	// params 1: nom de base (ajouter par exemple .x.tif pour sauver l'image)
 
-    imImage *page = (imImage*)params[0];    
-	if ( !GetImageFromPage( &m_opIm, page, m_y - ( STAFF_HEIGHT / 2 )  ) )
+    cv::Mat *page = (cv::Mat*)params[0];
+	if ( !GetImageFromPage( m_opIm, *page, m_y - ( STAFF_HEIGHT / 2 )  ) )
 		return;
 
 	wxString filename = *(wxString*)params[1];
 	filename << "_" << staff << ".0.tif"; // .0.tif stays for backward compatibility with previous versions with segments
 
-    if ( !Write( filename, &m_opIm ) )
+    if ( !Write( filename, m_opIm ) )
         return;
 
     this->Terminate( ERR_NONE );
@@ -804,38 +809,42 @@ void ImStaff::CalcStaffHeight(const int staff, wxArrayPtrVoid params )
     // param 0: image de la page
 	// param 1: pointer to int[] = height ( output )
 
-    imImage *page = (imImage*)params[0];    
-	if ( !GetImageFromPage( &m_opIm, page, m_y - ( STAFF_HEIGHT / 2 ) ) )
+    cv::Mat *page = (cv::Mat*)params[0];
+	if ( !GetImageFromPage( m_opIm, *page, m_y - ( STAFF_HEIGHT / 2 ) ) )
 		return;
 
 	int *height = (int*)params[1];
 
     int x = 0;
     int width = POSITION_WIN;
-	if ( m_opIm->width < width ) // force at least one corretation
-		width = m_opIm->width;
+	if ( m_opIm.cols < width ) // force at least one corretation
+		width = m_opIm.cols;
     int step = POSITION_STEP;
 
-    m_opImTmp1 = imImageCreate( width, STAFF_HEIGHT, m_opIm->color_space, m_opIm->data_type);
-    if ( !m_opImTmp1 )
+    m_opImTmp1 = cv::Mat( STAFF_HEIGHT, width, CV_8UC1 );
+    if ( m_opImTmp1.empty() )
     {
         this->Terminate( ERR_MEMORY );
         return;
     }
-    
-    m_opHist = new int[ m_opImTmp1->height ];
 
-	m_opLines1 = new int[ m_opIm->width ];
+    m_opHist = new int[ m_opImTmp1.rows ];
+
+	m_opLines1 = new int[ m_opIm.cols ];
 	int lines = 0;
     //wxLogMessage("Segment %d - %d", staff, segment);
     while (1)
     {
-        if ( x + width > m_opIm->width )
+        if ( x + width > m_opIm.cols )
             break;
 
-        imProcessCrop( m_opIm, m_opImTmp1, x, 0);
+        m_opIm(cv::Rect(x, 0, m_opImTmp1.cols, m_opImTmp1.rows)).copyTo(m_opImTmp1);
 
-        imAnalyzeProjectionH( m_opImTmp1, m_opHist );
+        {
+            std::vector<int> hist;
+            ax::projection_h( m_opImTmp1, hist );
+            std::copy(hist.begin(), hist.end(), m_opHist);
+        }
 
 		// pic de l'histogramme :bottom - top = epaisseur de portee;
 		int i, top = 0;
@@ -879,31 +888,31 @@ void ImStaff::CalcCorrelation(const int staff, wxArrayPtrVoid params )
 	// params 2: hauteur de la portee
 	// params 3: number of staff lines
 
-    imImage *page = (imImage*)params[0];    
-	if ( !GetImageFromPage( &m_opIm, page, m_y - ( STAFF_HEIGHT / 2 ) ) )
+    cv::Mat *page = (cv::Mat*)params[0];
+	if ( !GetImageFromPage( m_opIm, *page, m_y - ( STAFF_HEIGHT / 2 ) ) )
 		return;
 
     int x = 0;
     int width = POSITION_WIN;
-	if ( m_opIm->width < width ) // force at least one corretation
-		width = m_opIm->width;
+	if ( m_opIm.cols < width ) // force at least one corretation
+		width = m_opIm.cols;
     int step = POSITION_STEP;
     int dec_y, max;
 
-    m_opImTmp1 = imImageCreate( width, STAFF_HEIGHT, m_opIm->color_space, m_opIm->data_type);
-    if ( !m_opImTmp1 )
+    m_opImTmp1 = cv::Mat( STAFF_HEIGHT, width, CV_8UC1 );
+    if ( m_opImTmp1.empty() )
     {
         this->Terminate( ERR_MEMORY );
         return;
     }
-    
-    m_opHist = new int[ m_opImTmp1->height ];
+
+    m_opHist = new int[ m_opImTmp1.rows ];
 
     int mask[STAFF_HEIGHT];
 	int height = *(int*)params[2];
 	int numstafflines = *(int*)params[3];
     CalcMask( height, numstafflines, mask );
-	
+
 	int peak_val, median_val;
 
 	wxArrayInt positions_tosave; // positions � conserver dans le fichier xml - pas tous les px mais 1 par POSITION_STEP
@@ -912,15 +921,19 @@ void ImStaff::CalcCorrelation(const int staff, wxArrayPtrVoid params )
     //wxLogMessage("Segment %d - %d", staff, segment);
     while (1)
     {
-        if ( x + width > m_opIm->width )
+        if ( x + width > m_opIm.cols )
             break;
-        imProcessCrop( m_opIm, m_opImTmp1, x, 0);
-        imAnalyzeProjectionH( m_opImTmp1, m_opHist );
+        m_opIm(cv::Rect(x, 0, m_opImTmp1.cols, m_opImTmp1.rows)).copyTo(m_opImTmp1);
+        {
+            std::vector<int> hist;
+            ax::projection_h( m_opImTmp1, hist );
+            std::copy(hist.begin(), hist.end(), m_opHist);
+        }
         corr(m_opHist, mask, STAFF_HEIGHT, CORRELATION_HEIGHT, &dec_y, &max );
 		//wxLogMessage("dec y = %d - max %d", dec_y , max);
 		positions_tosave.Add( dec_y );
 		//
-		imAnalyzeRuns( m_opImTmp1, &peak_val, &median_val, 1 );
+		ax::analyze_runs( m_opImTmp1, peak_val, median_val, 1 );
 		//wxLogMessage("peak_val = %d, median_val = %d", peak_val , median_val );
 		line_p_tosave.Add( peak_val );
 		line_m_tosave.Add( median_val );		
@@ -1006,37 +1019,37 @@ void ImStaff::CalcFeatures(const int staff, wxArrayPtrVoid params )
 
 	//wxLogMessage("Staff segment %d.%d", staff , segment );
     
-	imImage *page = (imImage*)params[0];       
-	if ( !GetImageFromPage( &m_opIm, page, m_y - ( STAFF_HEIGHT / 2 ) ) )
+	cv::Mat *page = (cv::Mat*)params[0];
+	if ( !GetImageFromPage( m_opIm, *page, m_y - ( STAFF_HEIGHT / 2 ) ) )
 		return;
 
     int x = 0;
     int width = *(int*)params[1];
-	if ( m_opIm->width < width ) // force at least one correlation
-		width = m_opIm->width;
+	if ( m_opIm.cols < width ) // force at least one correlation
+		width = m_opIm.cols;
     int step = width - *(int*)params[2];
 
-    m_opImTmp1 = imImageCreate( width, STAFF_HEIGHT, m_opIm->color_space, m_opIm->data_type);
-    if ( !m_opImTmp1 || !width )
+    m_opImTmp1 = cv::Mat( STAFF_HEIGHT, width, CV_8UC1 );
+    if ( m_opImTmp1.empty() || !width )
     {
         this->Terminate( ERR_MEMORY );
         return;
     }
 
-	int size = FEATURES_COUNT * ( m_opIm->width / step );
+	int size = FEATURES_COUNT * ( m_opIm.cols / step );
 	float *values = (float*)malloc( size * sizeof(float) );
 	memset(values, 0, size * sizeof(float) );
 	//wxLogMessage("step %d", step );
 	int samples = 0;
-    
+
 	int height = *(int*)params[5];
 
     while (1)
     {
-        if ( x + width > m_opIm->width )
+        if ( x + width > m_opIm.cols )
             break;
-			
-        imProcessCrop( m_opIm, m_opImTmp1, x, 0);
+
+        m_opIm(cv::Rect(x, 0, m_opImTmp1.cols, m_opImTmp1.rows)).copyTo(m_opImTmp1);
 		CalcWinFeatures( m_opImTmp1, values + ( samples * FEATURES_COUNT ), m_positions[ x ], height, m_line_p[x] ); // 01 et al.
 		// CalcWinFeatures( m_opImTmp1, values + ( samples * FEATURES_COUNT ), m_positions[ x ], height, m_line_m[x] ); // 02
 		samples++;
@@ -1065,59 +1078,59 @@ void ImStaff::CalcLyricFeatures( const int staff, wxArrayPtrVoid params )
 		return;
 	}
 	   
-	imImage *page = (imImage*)params[0];
+	cv::Mat *page = (cv::Mat*)params[0];
 	wxString filename = *(wxString*)params[1];
 	int *TopOfLyricLine = (int*)params[2];
 	int *BottomOfLyricLine = (int*)params[3];
 	double *overallProjection = (double*)params[4];
 	int **offsets = (int**)params[5];
 	int width = *(int*)params[6];
-	
-	if ( !GetImageFromPage( &m_opIm, page, TopOfLyricLine[staff], BottomOfLyricLine[staff] ) )
+
+	if ( !GetImageFromPage( m_opIm, *page, TopOfLyricLine[staff], BottomOfLyricLine[staff] ) )
 		return;
-	
-//	m_opImTmp1 = imImageCreate( m_opIm->height, m_opIm->width, m_opIm->color_space, m_opIm->data_type );	
+
+//	m_opImTmp1 = cv::Mat( m_opIm.cols, m_opIm.rows, CV_8UC1 );
 //	CorrectLyricCurvature( m_opIm, m_opImTmp1 );
 
 	FindLyricBaseLine( m_opIm, overallProjection, offsets[staff], width );
-	
+
 	// Save lyric images testing purposes
 	filename << "_" << staff << "lyric.0.tif"; // .0.tif stays for backward compatibility with previous versions with segments
-    if ( !Write( filename, &m_opIm ) )
+    if ( !Write( filename, m_opIm ) )
         return;
-	
+
     this->Terminate( ERR_NONE );
 }
  
 //  The dest image must have the same dimensions as the src image but with inverted dimension (i.e. a 90 degree rotation of the src)
 //  The corrected image is saved in the src
-void ImStaff::CorrectLyricCurvature( imImage *src, imImage *dest )
+void ImStaff::CorrectLyricCurvature( cv::Mat &src, cv::Mat &dest )
 {
-	imProcessRotate90( src, dest, true);
-	
-	imbyte *buffer = (imbyte*)dest->data[0];
-	imbyte *tmp = (imbyte*)malloc( dest->height * dest->width * sizeof( imbyte ) );
-	memset( tmp, 0, dest->height * dest->width );
-	
-	for ( int i = 0; i < dest->height; i++ ){
-		if ( m_positions[i] < 0 && m_positions[i] < dest->width ){
-			memcpy( tmp + ( i * dest->width ) + m_positions[i], buffer + ( i * dest->width ), dest->width - m_positions[i] );
-			memcpy( buffer + ( i * dest->width ), tmp + ( i * dest->width ), dest->width );
-		} else if ( m_positions[i] > 0 && m_positions[i] < dest->width ){
-			memcpy( tmp + ( i * dest->width ), buffer + ( i * dest->width ) + m_positions[i], dest->width - m_positions[i] );
-			memcpy( buffer + ( i * dest->width ), tmp + ( i * dest->width ), dest->width );
-		}	
+	cv::rotate(src, dest, cv::ROTATE_90_CLOCKWISE);
+
+	imbyte *buffer = dest.data;
+	imbyte *tmp = (imbyte*)malloc( dest.rows * dest.cols * sizeof( imbyte ) );
+	memset( tmp, 0, dest.rows * dest.cols );
+
+	for ( int i = 0; i < dest.rows; i++ ){
+		if ( m_positions[i] < 0 && m_positions[i] < dest.cols ){
+			memcpy( tmp + ( i * dest.cols ) + m_positions[i], buffer + ( i * dest.cols ), dest.cols - m_positions[i] );
+			memcpy( buffer + ( i * dest.cols ), tmp + ( i * dest.cols ), dest.cols );
+		} else if ( m_positions[i] > 0 && m_positions[i] < dest.cols ){
+			memcpy( tmp + ( i * dest.cols ), buffer + ( i * dest.cols ) + m_positions[i], dest.cols - m_positions[i] );
+			memcpy( buffer + ( i * dest.cols ), tmp + ( i * dest.cols ), dest.cols );
+		}
 	}
-	imProcessRotate90( dest, src, false);
+	cv::rotate(dest, src, cv::ROTATE_90_COUNTERCLOCKWISE);
 	free ( tmp );
 }
 
-void ImStaff::FindLyricBaseLine( imImage *src, double *overallProjection, int *offsets, int windowWidth )
+void ImStaff::FindLyricBaseLine( cv::Mat &src, double *overallProjection, int *offsets, int windowWidth )
 {
 	int subimageSize = windowWidth;
-	int height = src->height;
-	int width = src->width;
-	imbyte *buffer = (imbyte*)src->data[0];
+	int height = src.rows;
+	int width = src.cols;
+	const imbyte *buffer = src.data;
 	int *reference = (int*)malloc( height * sizeof(int) );
 
 	int i, j, k;
@@ -1222,84 +1235,84 @@ void ImStaff::ExtractLyricImages( const int staff, wxArrayPtrVoid params )
 	// params 9: baseline window width
 	// params 10: fichier contenant la liste des fichiers mfc
 
-	imImage *page = (imImage*)params[0];
+	cv::Mat *page = (cv::Mat*)params[0];
 	int width = *(int*)params[1];
 	wxString filename = *(wxString*)params[3];
 	int **offsets = (int**)params[4];
 	int baseline = *(int*)params[5];
 	int topline = *(int*)params[6];
-	
+
 	int imageHeight = baseline - topline;
 
 	// Load saved lyric image
 	//	m_opIm = imFileImageLoad( filename, 0, 0 );
 	//	if ( m_opIm )
 	//	return;
-	
+
 	//Should open the saved file here instead of recropping...
 	int *TopOfLyricLine = (int*)params[7];
 	int *BottomOfLyricLine = (int*)params[8];
-	if ( !GetImageFromPage( &m_opIm, page, TopOfLyricLine[staff], BottomOfLyricLine[staff] ) )
+	if ( !GetImageFromPage( m_opIm, *page, TopOfLyricLine[staff], BottomOfLyricLine[staff] ) )
 		return;
-	
+
 	//This was removed because better results were obtained when cropping the lyrics without the curvature adjustment
-	//  m_opImTmp1 = imImageCreate( m_opIm->height, m_opIm->width, m_opIm->color_space, m_opIm->data_type );	
-	//  CorrectLyricCurvature( m_opIm, m_opImTmp1 );	
-	//  ImageDestroy( &m_opImTmp1 );	
-	
+	//  m_opImTmp1 = cv::Mat( m_opIm.cols, m_opIm.rows, CV_8UC1 );
+	//  CorrectLyricCurvature( m_opIm, m_opImTmp1 );
+	//  ImageDestroy( m_opImTmp1 );
+
 	// Crop lyric image using topline and baseline value
 	// m_opIm = large image
 	// m_opImTmp1 = cropped image
 	int avg_offset = 0;
 	int count = 0;
-	for ( int i = 0; i < ceil( m_opIm->width / *(int*)params[9] ); i++ ){
+	for ( int i = 0; i < ceil( m_opIm.cols / *(int*)params[9] ); i++ ){
 		if ( offsets[staff][i] > 0 ) {
 			avg_offset += offsets[staff][i];
 			count++;
 		}
 	}
 	avg_offset /= count;
-	int top_offset = topline + avg_offset - ( m_opIm->height / 2 );	
-	
-	if ( top_offset + imageHeight >= m_opIm-> height )
-		m_opImTmp1 = imImageCreate( m_opIm->width, m_opIm->height - top_offset, m_opIm->color_space, m_opIm->data_type );
-	else 
-		m_opImTmp1 = imImageCreate( m_opIm->width, imageHeight , m_opIm->color_space, m_opIm->data_type );
-	imImageClear( m_opImTmp1 );
-	imProcessCrop( m_opIm, m_opImTmp1, 0, top_offset );
-	
-	// Save cropped lyric image 
+	int top_offset = topline + avg_offset - ( m_opIm.rows / 2 );
+
+	if ( top_offset + imageHeight >= m_opIm.rows )
+		m_opImTmp1 = cv::Mat( m_opIm.rows - top_offset, m_opIm.cols, CV_8UC1 );
+	else
+		m_opImTmp1 = cv::Mat( imageHeight, m_opIm.cols, CV_8UC1 );
+	m_opImTmp1.setTo(0);
+	m_opIm(cv::Rect(0, top_offset, m_opImTmp1.cols, m_opImTmp1.rows)).copyTo(m_opImTmp1);
+
+	// Save cropped lyric image
 	wxString image_filename = filename;
 	image_filename << "_" << staff << "croppedLyric.0.tif";
-	if ( !Write( image_filename, &m_opImTmp1 ) )
+	if ( !Write( image_filename, m_opImTmp1 ) )
         return;
-	
+
 	// Do feature recognition on the cropped lyric image by calling CalcLyricWinFeatures on subwindows of the image
-	int x = 0;    
-	if ( m_opImTmp1->width < width ) // force at least one correlation
-		width = m_opIm->width;
+	int x = 0;
+	if ( m_opImTmp1.cols < width ) // force at least one correlation
+		width = m_opIm.cols;
     int step = width - *(int*)params[2];
-	
-    m_opImTmp2 = imImageCreate( width, m_opImTmp1->height, m_opImTmp1->color_space, m_opImTmp1->data_type );
-    if ( !m_opImTmp2 || !width )
+
+    m_opImTmp2 = cv::Mat( m_opImTmp1.rows, width, CV_8UC1 );
+    if ( m_opImTmp2.empty() || !width )
     {
         this->Terminate( ERR_MEMORY );
         return;
     }
-	
-	int size = LYRIC_FEATURES_COUNT * ( m_opImTmp1->width / step );
+
+	int size = LYRIC_FEATURES_COUNT * ( m_opImTmp1.cols / step );
 	float *values = (float*)malloc( size * sizeof(float) );
 	memset(values, 0, size * sizeof(float) );
 	//wxLogMessage("step %d", step );
-	int samples = 0; 
+	int samples = 0;
 
 	int white_spaces = 0;
     while (1)
     {
-        if ( x + width > m_opImTmp1->width )
+        if ( x + width > m_opImTmp1.cols )
             break;
-		
-        imProcessCrop( m_opImTmp1, m_opImTmp2, x, 0);
+
+        m_opImTmp1(cv::Rect(x, 0, m_opImTmp2.cols, m_opImTmp2.rows)).copyTo(m_opImTmp2);
 		if ( CalcLyricWinFeatures( m_opImTmp2, values + ( samples * LYRIC_FEATURES_COUNT ) ) ){
 			samples++;
 			white_spaces = 0;

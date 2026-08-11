@@ -10,6 +10,9 @@
 
 #include "imstaffsegment.h"
 
+#include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
+
 
 //----------------------------------------------------------------------------
 // ImStaffSegment
@@ -27,52 +30,50 @@ ImStaffSegment::~ImStaffSegment()
 
 bool ImStaffSegment::AnalyzeSegment()
 {
-    wxASSERT_MSG( m_opImMap, wxT("MAP Image cannot be NULL") );
-    int i;
+    wxASSERT_MSG( !m_opImMap.empty(), wxT("MAP Image cannot be NULL") );
 
-    if ( !GetImagePlane( &m_opImMain ) )
+    if ( !GetImagePlane( m_opImMain ) )
         return false;
 
-    // margins
-    m_opImTmp1 = imImageCreate( m_opImMain->width + 2, m_opImMain->height + 2, m_opImMain->color_space, m_opImMain->data_type );
-    if (!m_opImTmp1)
-        return this->Terminate( ERR_MEMORY );
-    imProcessAddMargins( m_opImMain, m_opImTmp1, 1, 1);
-    SwapImages( &m_opImMain, &m_opImTmp1 );
+    cv::Mat &src = m_opImMain;
 
+    // 1-pixel background margin so components touching the edge don't
+    // fuse with the border in the following morphological close.
+    cv::Mat bordered;
+    cv::copyMakeBorder(src, bordered, 1, 1, 1, 1,
+                       cv::BORDER_CONSTANT, cv::Scalar(0));
 
-    // close
-    m_opImTmp1 = imImageClone( m_opImMain );
-    if (!m_opImTmp1)
-        return this->Terminate( ERR_MEMORY );
-    imProcessBinMorphClose( m_opImMain, m_opImTmp1, 5, 1);
-    SwapImages( &m_opImMain, &m_opImTmp1 );
+    // 5x5 binary morphological close, single iteration.
+    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT,
+                                                cv::Size(5, 5));
+    cv::morphologyEx(bordered, bordered, cv::MORPH_CLOSE, kernel);
 
-    
-    m_opIm = imImageCreate(m_opImMain->width, m_opImMain->height, IM_GRAY, IM_USHORT);
-    int region_count = 0;
-    imAnalyzeFindRegions ( m_opImMain, m_opIm, 8, 1, &region_count);
+    // 8-connectivity connected components with per-label area stats.
+    cv::Mat labels, stats, centroids;
+    int region_count = cv::connectedComponentsWithStats(
+        bordered, labels, stats, centroids, /*connectivity=*/8, CV_32S);
 
-    int* area = (int*)malloc( region_count * sizeof(int) );
-    memset(area, 0, region_count * sizeof(int) );
-    double* perim = (double*)malloc( region_count * sizeof(double) );
-    memset(perim, 0, region_count * sizeof(double) );
-
-    imAnalyzeMeasureArea( m_opIm, area, 1 );
-    imAnalyzeMeasurePerimeter( m_opIm, perim, 1 );
-
+    // Sum compactness across foreground labels. The original per-region
+    // term is:   perim^2 / (4*pi*area) * (area / width)
+    // where `area / width` is INTEGER division on ints — small regions
+    // (area < width) therefore contribute zero. Preserved so the
+    // downstream ratio check in ImPage stays aligned.
     float c = 0;
-    for (i = 0; i < region_count; i++ )
-    {
-        c += pow(perim[i],2) / (4 * AX_PI * area[i]) * (area[i] / m_opIm->width);
-    }
-    //a /= median( area, region_count);
-    //p /= medianf( perim, region_count);
-    //wxLogMessage("compactness %f", c / region_count  );
-    this->m_compactness = c;
+    for (int label = 1; label < region_count; ++label) {
+        int area = stats.at<int>(label, cv::CC_STAT_AREA);
 
-    free( area );
-    free( perim );
+        cv::Mat mask = (labels == label);
+        std::vector<std::vector<cv::Point>> contours;
+        cv::findContours(mask, contours, cv::RETR_EXTERNAL,
+                         cv::CHAIN_APPROX_NONE);
+        double perim = 0.0;
+        for (const auto& contour : contours) {
+            perim += cv::arcLength(contour, /*closed=*/true);
+        }
+
+        c += pow(perim, 2) / (4 * AX_PI * area) * (area / bordered.cols);
+    }
+    this->m_compactness = c;
 
     return this->Terminate( ERR_NONE );
 }
