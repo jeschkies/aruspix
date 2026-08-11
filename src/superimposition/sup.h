@@ -42,8 +42,6 @@ enum
     ID2_POPUP_TREE_AX_DELETE
 };
 
-struct _imImage;
-
 class AxProgressDlg;
 class AxImageController;
 
