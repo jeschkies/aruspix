@@ -159,8 +159,16 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      # windows-latest ships NSIS (makensis) preinstalled, so no extra
-      # setup step is needed here.
+      # windows-latest doesn't ship NSIS; Chocolatey does ship on the
+      # runner, so use it to install makensis and put it on PATH for
+      # the cpack step below.
+      - name: Install NSIS (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          choco install nsis -y --no-progress
+          echo "C:/Program Files (x86)/NSIS" >> "$GITHUB_PATH"
+
       - name: Package installer (Windows)
         if: runner.os == 'Windows'
         shell: bash
