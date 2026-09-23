@@ -532,11 +532,9 @@ void RecFile::GetImage1( AxImage *image )
 
 	// for backwards compatibility, return m_img0 if m_img1 doesn't exists
 	if ( !m_imPagePtr->m_img1.empty() ) {
-		ImView v( m_imPagePtr->m_img1, IM_GRAY );
-		SetImImage( v, image );
+		SetCvMat( image, m_imPagePtr->m_img1 );
 	} else {
-		ImView v( m_imPagePtr->m_img0, IM_MAP );
-		SetImImage( v, image );
+		SetCvMat( image, m_imPagePtr->m_img0 );
 	}
 }
 #endif
@@ -548,8 +546,7 @@ void RecFile::GetImage0( AxImage *image )
 	wxASSERT_MSG( m_imPagePtr, "imPagePtr cannot be NULL" );
 	wxASSERT_MSG( !m_imPagePtr->m_img0.empty(), "Img0 cannot be NULL" );
 
-	ImView v( m_imPagePtr->m_img0, IM_MAP );
-	SetImImage( v, image );
+	SetCvMat( image, m_imPagePtr->m_img0 );
 }
 #endif
 

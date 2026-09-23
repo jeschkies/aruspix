@@ -14,6 +14,8 @@
 
 #include "wx/image.h"
 
+#include <opencv2/core.hpp>
+
 
 
 //----------------------------------------------------------------------------
@@ -49,21 +51,23 @@ private:
 };
 
 
-#if	defined(__cplusplus)
-extern "C" {
-#endif
+// ---------------------------------------------------------------------------
+// cv::Mat <-> AxImage bridging helpers. These replace the earlier
+// GetImImage / SetImImage pair, which round-tripped pixel data through
+// the IM library. The functions preserve the vertical-flip semantics of
+// the old code (IM images are bottom-left origin, wxImage is top-left)
+// so the surrounding pipeline behaves identically. See aximage.cpp.
+// ---------------------------------------------------------------------------
 
-struct _imImage;
+// Copy AxImage's RGB pixel data into a cv::Mat CV_8UC3 in BGR order,
+// applying the same vertical flip that GetImImage(IM_RGB) performed.
+cv::Mat GetCvMat(const AxImage *img);
 
-_imImage* GetImImage(const AxImage *img, const int color_space = 0, const int data_type = 0);
-
-void SetImImage(_imImage *im, AxImage *img);
-
-
-#if defined(__cplusplus)
-}
-#endif
-
+// Fill AxImage from a cv::Mat. Accepts CV_8UC1 (grayscale — broadcast to
+// R=G=B) or CV_8UC3 (BGR — reordered to RGB). Applies the same vertical
+// flip that SetImImage performed on its way out to wxImage. Handles
+// Destroy+Create when the size doesn't match.
+void SetCvMat(AxImage *img, const cv::Mat &mat);
 
 
 #endif // __AX_CORE_IMAGE_H__

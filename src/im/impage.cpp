@@ -1981,7 +1981,9 @@ bool ImPage::MagicSelection( int x, int y, AxImage *selection, int *xmin, int *y
 	m_selection_pos.x = box[0];
 	m_selection_pos.y = box[2];
 
-	// change in red — build a MAP-encoded IM image with palette for display.
+	// change in red — build a BGR display image. m_opImTmp1 is a
+	// single-channel mask (1 where the connected component was selected,
+	// 0 elsewhere). Fill a white background and paint selected pixels red.
 	ImageDestroy( m_opImTmp1 );
 	m_opImTmp1 = cv::Mat(m_selection.rows, m_selection.cols, CV_8UC1);
 	if (m_opImTmp1.empty())
@@ -1989,18 +1991,12 @@ bool ImPage::MagicSelection( int x, int y, AxImage *selection, int *xmin, int *y
 
 	m_opImTmp1.setTo(0);
 	cv::add( m_opImTmp1, m_selection, m_opImTmp1 );
-    long *pal = imPaletteGray();
-    pal[0] = imColorEncode( 255, 255, 255 ); // fond blanc
-    pal[1] = imColorEncode( 255, 0, 0 ); // rouge
-    // Push the local palette into the IM header when handing the buffer off
-    // to SetImImage — allocate a bridging _imImage that owns the palette.
-    _imImage *disp = imImageCreate( m_opImTmp1.cols, m_opImTmp1.rows, IM_MAP, IM_BYTE );
-    if (!disp)
-        return this->Terminate( ERR_MEMORY );
-    memcpy(disp->data[0], m_opImTmp1.data, (size_t)m_opImTmp1.total());
-    imImageSetPalette( disp, pal, 256 );
 
-    SetImImage( disp, selection );
+	cv::Mat display(m_opImTmp1.rows, m_opImTmp1.cols, CV_8UC3,
+	                cv::Scalar(255, 255, 255)); // white background (BGR)
+	display.setTo(cv::Scalar(0, 0, 255), m_opImTmp1 == 1); // red (BGR)
+
+	SetCvMat( selection, display );
 	*xmin = m_selection_pos.x;
 	*ymin = ToViewY( m_selection_pos.y ) - m_selection.rows;
 

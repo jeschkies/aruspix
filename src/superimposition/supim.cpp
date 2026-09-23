@@ -21,14 +21,8 @@ using std::max;
 #include "app/axapp.h"
 //#include "app/axframe.h"
 
-// IMLIB
-#include <im.h>
-#include <im_image.h>
-#include <im_convert.h>
-#include <im_process.h>
-#include <im_util.h>
-#include <im_binfile.h>
-#include <im_math_op.h>
+#include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
 
 
 
@@ -317,8 +311,7 @@ SupImController::SupImController( wxWindow *parent, wxWindowID id,
     const wxPoint &position, const wxSize& size, long style , int flags) :
     AxImageController( parent, id, position, size, style, flags )
 {
-    m_redIm = NULL;
-    m_greenIm = NULL;
+    // m_redIm / m_greenIm are default-constructed cv::Mat (empty).
     m_imControl1Ptr = NULL;
     m_imControl2Ptr = NULL;
     m_viewSrc1Ptr = NULL;
@@ -337,10 +330,7 @@ SupImController::SupImController()
 
 SupImController::~SupImController()
 {
-    if ( m_redIm ) 
-		imImageDestroy( m_redIm );
-    if ( m_greenIm ) 
-		imImageDestroy( m_greenIm );
+    // cv::Mat cleans itself up.
 }
 
 void SupImController::SetControllers( AxImageController *controller1, AxImageController *controller2 )
@@ -358,28 +348,24 @@ void SupImController::SetViews( SupImSrcWindow *view1, SupImSrcWindow *view2 )
 void SupImController::ResetImage( AxImage image )
 {
     AxImageController::ResetImage( image );
-	
+
 	if ( !m_imControl1Ptr || !m_imControl2Ptr )
 		return;
 
     wxGetApp().AxBeginBusyCursor();
 
-    imImage *im1 = GetImImage( this, ( IM_RGB ) );
+    // Pull the current wxImage/AxImage into a BGR cv::Mat (top-left origin
+    // after the vertical flip GetCvMat applies, matching the old IM_RGB
+    // buffer layout).
+    cv::Mat bgr = GetCvMat( this );
 
-    if ( m_redIm ) 
-		imImageDestroy( m_redIm );
-    m_redIm = NULL;
-    if ( m_greenIm ) 
-		imImageDestroy( m_greenIm );
-    m_greenIm = NULL;
-
-    // memorisation des 2 buffers
-    m_redIm = imImageCreate( im1->width, im1->height, IM_GRAY, IM_BYTE );
-    memcpy( m_redIm->data[0], im1->data[0], m_redIm->size );
-    m_greenIm = imImageCreate( im1->width, im1->height, IM_GRAY, IM_BYTE );
-    memcpy( m_greenIm->data[0], im1->data[1], m_greenIm->size );
-   
-    imImageDestroy( im1 );
+    // Store the R and G channels for later brightness compositing.
+    // OpenCV BGR: channel 0=B, 1=G, 2=R — the old IM code stored
+    // data[0] as red and data[1] as green.
+    std::vector<cv::Mat> planes;
+    cv::split( bgr, planes );
+    m_redIm = planes[2].clone();
+    m_greenIm = planes[1].clone();
 
     wxGetApp().AxEndBusyCursor();
 
@@ -387,56 +373,65 @@ void SupImController::ResetImage( AxImage image )
 
 void SupImController::UpdateBrightness( )
 {
-    if (! m_redIm || ! m_greenIm ) 
+    if ( m_redIm.empty() || m_greenIm.empty() )
         return;
-		
+
 	if ( !m_imControl1Ptr || !m_imControl2Ptr )
 		return;
 
     wxASSERT_MSG(m_viewPtr,"View cannot be NULL");
 
     wxGetApp().AxBeginBusyCursor();
-    
-    int w = m_redIm->width;
-    int h = m_redIm->height;
-    // ajustement de brightness
-    imImage *im1 = imImageCreate( w, h, IM_RGB, IM_BYTE );
-    imImage *r_buf = imImageDuplicate( m_redIm );
-    imImage *g_buf = imImageDuplicate( m_greenIm );
-    imImage *imTmp = imImageCreate( w, h, IM_GRAY, IM_BYTE );
 
-    double param[2] = { 0, 0 }; // %
+    // Working buffers: r_buf/g_buf accumulate brightness/contrast-adjusted
+    // planes; imTmp is scratch. Replaces the old IM_GAMUT_BRIGHTCONT tone
+    // adjust + IM_BIT_OR/IM_BIT_AND combines with cv::convertTo and
+    // cv::bitwise_or / cv::bitwise_and.
+    cv::Mat r_buf = m_redIm.clone();
+    cv::Mat g_buf = m_greenIm.clone();
+    cv::Mat imTmp;
 
-    if ( (m_greenBrightness != 0)  || (m_greenContrast != 0))
-    {   
-        param[0] = 5.0 * (float)m_greenBrightness;
-        param[1] = 5.0 * (float)m_greenContrast;
-        imProcessToneGamut( r_buf , imTmp, IM_GAMUT_BRIGHTCONT, param);
-        imProcessBitwiseOp( r_buf, g_buf, r_buf, IM_BIT_OR ); // valeurs communes doivent rester � 100%
-        imProcessBitwiseOp( imTmp, r_buf, r_buf, IM_BIT_AND ); // AND entre valeurs communes et brightness ajuste
+    // IM's IM_GAMUT_BRIGHTCONT with parameters (brightness_pct, contrast_pct)
+    // is a linear scale/offset:
+    //   contrast_factor = 1 + contrast_pct / 100  (== tan of a rotation)
+    //   out = clamp((in - 128) * contrast_factor + 128 + brightness_pct * 2.55, 0, 255)
+    // The old code multiplied the UI sliders by 5.0 before passing them in.
+    auto apply_bright_contrast = [](const cv::Mat &src, cv::Mat &dst,
+                                    double brightness_pct, double contrast_pct)
+    {
+        double alpha = 1.0 + contrast_pct / 100.0;
+        double beta  = 128.0 * (1.0 - alpha) + brightness_pct * 2.55;
+        src.convertTo(dst, CV_8U, alpha, beta);
+    };
+
+    if ( (m_greenBrightness != 0) || (m_greenContrast != 0) )
+    {
+        double b = 5.0 * (double)m_greenBrightness;
+        double c = 5.0 * (double)m_greenContrast;
+        apply_bright_contrast( r_buf, imTmp, b, c );
+        cv::bitwise_or ( r_buf, g_buf, r_buf ); // valeurs communes doivent rester à 100%
+        cv::bitwise_and( imTmp, r_buf, r_buf ); // AND entre valeurs communes et brightness ajusté
     }
-    if ( (m_redBrightness != 0)  || (m_redContrast != 0))
-    {        
-        param[0] = 5.0 * (float)m_redBrightness;
-        param[1] = 5.0 * (float)m_redContrast;
-        imProcessToneGamut( g_buf , imTmp, IM_GAMUT_BRIGHTCONT, param);
-        imProcessBitwiseOp( g_buf, r_buf, g_buf, IM_BIT_OR ); // valeurs communes doivent rester � 100%
-        imProcessBitwiseOp( imTmp, g_buf, g_buf, IM_BIT_AND ); // AND entre valeurs communes et brightness ajuste
+    if ( (m_redBrightness != 0) || (m_redContrast != 0) )
+    {
+        double b = 5.0 * (double)m_redBrightness;
+        double c = 5.0 * (double)m_redContrast;
+        apply_bright_contrast( g_buf, imTmp, b, c );
+        cv::bitwise_or ( g_buf, r_buf, g_buf );
+        cv::bitwise_and( imTmp, g_buf, g_buf );
     }
-    imProcessBitwiseOp( r_buf, g_buf, imTmp, IM_BIT_AND );
+    cv::bitwise_and( r_buf, g_buf, imTmp );
 
-    memcpy( im1->data[0], r_buf->data[0], r_buf->size );
-    memcpy( im1->data[1], g_buf->data[0], g_buf->size );
-    memcpy( im1->data[2], imTmp->data[0], imTmp->size );
+    // Build a 3-channel BGR display image. The old IM code laid this out
+    // as planar RGB: data[0]=R=r_buf, data[1]=G=g_buf, data[2]=B=imTmp.
+    // OpenCV BGR channel order is (B, G, R) — so merge as (imTmp, g_buf,
+    // r_buf) to preserve the same pixel colours.
+    std::vector<cv::Mat> planes = { imTmp, g_buf, r_buf };
+    cv::Mat im1_bgr;
+    cv::merge( planes, im1_bgr );
 
-    imImageDestroy( r_buf );
-    imImageDestroy( g_buf );
-    imImageDestroy( imTmp );
+    SetCvMat( this, im1_bgr );
 
-
-    SetImImage( im1, this );
-
-    imImageDestroy( im1 );
     m_viewPtr->UpdateView();
     wxGetApp().AxEndBusyCursor();
 }
