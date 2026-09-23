@@ -758,7 +758,7 @@ bool ImRegister::SubRegister( imPoint origine, imSize window, imSize size, int l
     ImageDestroy( m_opImTmp2 );
 
     //wxLogDebug( "Correlation decalage %d %d", x, y );
-    
+
     // use the detected shift to determine the next window size (but at least 5 pixels)
     subwindow = imSize( max(abs(3*x), SupEnv::s_split_x), max(abs(3*y), SupEnv::s_split_y) );
 
@@ -838,7 +838,18 @@ bool ImRegister::SubRegister( imPoint origine, imSize window, imSize size, int l
 
     m_im2(cv::Rect(move_x, move_y, m_opImTmp1.cols, m_opImTmp1.rows)).copyTo(m_opImTmp1);
     // actually move the data
-    m_opImTmp1.copyTo( m_im2(cv::Rect(move_x - x, move_y - y, m_opImTmp1.cols, m_opImTmp1.rows)) );
+    //
+    // The correlation-detected shift (x, y) legitimately pushes this
+    // destination past m_im2's edge in the common case: at a border cell
+    // (row==1 or column==1 forces move_x/move_y to 0 so the moved region
+    // reaches the image edge), any shift back towards that same edge
+    // goes negative. m_im2 has no slack to absorb it (unlike m_opImAlign,
+    // padded by 2*window precisely for this), so a raw copyTo here throws
+    // -- cv::Mat's Rect bounds are strict, unlike the old IM crop this
+    // replaced, which most likely just clipped silently. ax::set_data()
+    // restores that clipping behaviour instead of failing the whole
+    // registration over a few border pixels.
+    ax::set_data( m_im2, m_opImTmp1, move_x - x, move_y - y );
     ImageDestroy( m_opImTmp1 );
 
     // the problem here is that we have a recusion: we cannot use a m_opXXX image because it would be overriden
@@ -848,7 +859,11 @@ bool ImRegister::SubRegister( imPoint origine, imSize window, imSize size, int l
 	if ( buffer.empty() )
         return this->Terminate( ERR_MEMORY );
 
-    m_im2(cv::Rect(origine.x - x, origine.y - y, buffer.cols, buffer.rows)).copyTo(buffer);
+    // Same border-shift case as above, on the read side. Zero first so
+    // the part clipped out of m_im2's bounds (if any) reads as background
+    // rather than stale/uninitialised data.
+    buffer.setTo(0);
+    ax::get_data( m_im2, buffer, origine.x - x, origine.y - y );
     
     
 	origine.x -= x;

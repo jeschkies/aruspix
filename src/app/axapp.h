@@ -14,6 +14,56 @@
 
 extern bool AxYield();
 
+/*
+ * GESTION DES IDS
+ *
+ * axapp.wdr 6000
+ * axoptions.wdr 8000
+ * axabout.wdr 9000
+ */
+
+ /*******************
+ * env.wdr 1x000
+ ** sup 12000
+ ** dsp 13000
+ ** rec 14000
+ ** edt 15000
+ ** cmp 16000
+ *******************
+ * mus.wdr 20000
+ * aximcontrol.wdr 21000
+ * local 22x000
+ */
+
+#define ENV_IDS_MIN 10000
+#define ENV_IDS_MAX 19999
+#define ENV_IDS_MIN_SUP 12000
+#define ENV_IDS_MAX_SUP 12999
+//#define ENV_IDS_MIN_DSP 13000 Free as Dsp doesn't exist anymore
+//#define ENV_IDS_MAX_DSP 13999
+#define ENV_IDS_MIN_REC 14000
+#define ENV_IDS_MAX_REC 14999
+#define ENV_IDS_MIN_EDT 15000
+#define ENV_IDS_MAX_EDT 15999
+#define ENV_IDS_MIN_CMP 16000
+#define ENV_IDS_MAX_CMP 16999
+
+#define ID_MIDI_INPUT 19999 // Last ID in mus.wdr
+
+#define ENV_IDS_LOCAL 22000
+#define ENV_IDS_LOCAL_SUP ENV_IDS_LOCAL + 200
+//#define ENV_IDS_LOCAL_DSP ENV_IDS_LOCAL + 300 Free as Dsp doesn't exist anymore
+#define ENV_IDS_LOCAL_REC ENV_IDS_LOCAL + 400
+#define ENV_IDS_LOCAL_EDT ENV_IDS_LOCAL + 500
+#define ENV_IDS_LOCAL_CMP ENV_IDS_LOCAL + 600
+#define ENV_BASE_ID 30000 // base id for environment menu items
+#define ENV_MAX 50 // max of environments (used for RANGE_ID event)
+
+// These ID constants are shared by module headers (sup.h, rec.h, edt.h,
+// cmp.h) regardless of build mode, so they live above the AX_CMDLINE
+// split -- a CMDLINE build never builds a menu with them, but it may
+// still need to compile a header that mentions them (e.g. a standalone
+// tool driving ImRegister directly).
 #ifdef AX_CMDLINE
 
 //----------------------------------------------------------------------------
@@ -73,50 +123,8 @@ public:
 #include "axapp_wdr.h"
 #include "axabout_wdr.h"
 
-/*
- * GESTION DES IDS
- *
- * axapp.wdr 6000
- * axoptions.wdr 8000
- * axabout.wdr 9000
- */
- 
- /*******************
- * env.wdr 1x000
- ** sup 12000
- ** dsp 13000
- ** rec 14000
- ** edt 15000
- ** cmp 16000
- *******************
- * mus.wdr 20000
- * aximcontrol.wdr 21000
- * local 22x000
- */
- 
-#define ENV_IDS_MIN 10000
-#define ENV_IDS_MAX 19999
-#define ENV_IDS_MIN_SUP 12000
-#define ENV_IDS_MAX_SUP 12999
-//#define ENV_IDS_MIN_DSP 13000 Free as Dsp doesn't exist anymore
-//#define ENV_IDS_MAX_DSP 13999
-#define ENV_IDS_MIN_REC 14000
-#define ENV_IDS_MAX_REC 14999
-#define ENV_IDS_MIN_EDT 15000
-#define ENV_IDS_MAX_EDT 15999
-#define ENV_IDS_MIN_CMP 16000
-#define ENV_IDS_MAX_CMP 16999
-
-#define ID_MIDI_INPUT 19999 // Last ID in mus.wdr
-
-#define ENV_IDS_LOCAL 22000
-#define ENV_IDS_LOCAL_SUP ENV_IDS_LOCAL + 200
-//#define ENV_IDS_LOCAL_DSP ENV_IDS_LOCAL + 300 Free as Dsp doesn't exist anymore
-#define ENV_IDS_LOCAL_REC ENV_IDS_LOCAL + 400
-#define ENV_IDS_LOCAL_EDT ENV_IDS_LOCAL + 500
-#define ENV_IDS_LOCAL_CMP ENV_IDS_LOCAL + 600
-#define ENV_BASE_ID 30000 // base id for environment menu items
-#define ENV_MAX 50 // max of environments (used for RANGE_ID event)
+// ENV_IDS_* / ENV_BASE_ID / ENV_MAX now live above, before the
+// AX_CMDLINE split -- see the comment there.
 
 // customized event type for midi
 DECLARE_EVENT_TYPE( AX_EVT_MIDI, -1 )

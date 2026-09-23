@@ -55,6 +55,32 @@ void set_data(cv::Mat& image, const cv::Mat& selection,
 	selection(src_rect).copyTo(image(dst_rect));
 }
 
+void get_data(const cv::Mat& image, cv::Mat& selection,
+              int pos_x, int pos_y)
+{
+	if (image.empty() || selection.empty()) return;
+	if (image.type() != selection.type()) return;
+
+	int w = selection.cols;
+	int h = selection.rows;
+	int sel_pos_x = 0;
+	int sel_pos_y = 0;
+
+	if ((pos_x > image.cols) || (pos_y > image.rows)) return;
+
+	if (pos_x < 0) { w += pos_x; sel_pos_x = -pos_x; pos_x = 0; }
+	if (pos_y < 0) { h += pos_y; sel_pos_y = -pos_y; pos_y = 0; }
+
+	if (pos_x + w > image.cols) w = image.cols - pos_x;
+	if (pos_y + h > image.rows) h = image.rows - pos_y;
+
+	if ((w <= 0) || (h <= 0)) return;
+
+	cv::Rect src_rect(pos_x, pos_y, w, h);
+	cv::Rect dst_rect(sel_pos_x, sel_pos_y, w, h);
+	image(src_rect).copyTo(selection(dst_rect));
+}
+
 bool safe_crop(const cv::Mat& image, int *width, int *height,
                int *pos_x, int *pos_y)
 {

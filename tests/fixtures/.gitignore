@@ -7,3 +7,8 @@
 # (See tests/test_binarize_goldens.cpp for the reference workflow.)
 actual/
 diff/
+
+# Large real-world scans used to reproduce the Windows Superimposition
+# crash locally (see tests/test_aximage_loadfile.cpp). Too big to commit;
+# populate from "Notenvergleich 1 - png.zip" (repo root, also untracked).
+sup_pages/
