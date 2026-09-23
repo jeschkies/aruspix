@@ -8,8 +8,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Dependencies are provided by Conan; see conanfile.py + recipes/im/.
 # Configure with `cmake --preset conan-release` after `conan install`.
 find_package(im REQUIRED)
+find_package(OpenCV REQUIRED)
 find_package(wxWidgets REQUIRED)
 find_package(LibXml2 REQUIRED)
+find_package(doctest REQUIRED)
 
 set(aruspixSources
     src/app/axabout_wdr.cpp
@@ -41,10 +43,10 @@ set(aruspixSources
     src/edition/edtfile.cpp
     src/edition/edt_wdr_inc.cpp
 
+    src/im/binarize.cpp
     src/im/imbrink3classes.cpp
     src/im/imbrink.cpp
     src/im/imext.cpp
-    src/im/imkmeans.cpp
     src/im/imoperator.cpp
     src/im/impage.cpp
     src/im/imregister.cpp
@@ -167,6 +169,7 @@ endif()
 
 target_link_libraries(aruspix PRIVATE
     im::im
+    opencv::opencv
     wxWidgets::wxWidgets
     LibXml2::LibXml2
 )
@@ -197,4 +200,75 @@ elseif(WIN32)
                 $<TARGET_RUNTIME_DLLS:aruspix> $<TARGET_FILE_DIR:aruspix>
         COMMAND_EXPAND_LISTS
     )
+endif()
+
+# ---------------------------------------------------------------------------
+# Tests
+#
+# A separate target that exercises the wx-free leaf functions in src/im/
+# (imext.cpp, imbrink.cpp, imbrink3classes.cpp). These pin down current
+# IM behavior so we can swap IM for OpenCV without regressions.
+# The wx-coupled wrapper classes (ImPage, ImStaff, ImRegister, ImOperator)
+# are intentionally not covered here — they need real-image fixtures and
+# belong in an integration-test target.
+# ---------------------------------------------------------------------------
+enable_testing()
+
+add_executable(aruspix_tests
+    src/im/binarize.cpp
+    src/im/imext.cpp
+    src/im/imbrink.cpp
+    src/im/imbrink3classes.cpp
+
+    tests/test_main.cpp
+    tests/test_imext_helpers.cpp
+    tests/test_imext_image.cpp
+    tests/test_imext_threshold.cpp
+    tests/test_binarize.cpp
+    tests/test_binarize_goldens.cpp
+)
+
+target_include_directories(aruspix_tests PRIVATE src/im)
+
+# Point the goldens test at the fixtures directory regardless of the
+# working directory ctest ends up in.
+target_compile_definitions(aruspix_tests PRIVATE
+    AX_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures"
+)
+
+target_link_libraries(aruspix_tests PRIVATE
+    im::im
+    opencv::opencv
+    doctest::doctest
+)
+
+if(WIN32)
+    # Same libtiff/libpng duplicate-symbol issue as the main exe.
+    target_link_options(aruspix_tests PRIVATE /FORCE:MULTIPLE /IGNORE:4006 /IGNORE:4088)
+endif()
+
+add_test(NAME aruspix_tests COMMAND aruspix_tests)
+
+# ---------------------------------------------------------------------------
+# Tools
+#
+# dump_binarize: one-shot fixture generator. Runs ax::binarize_and_clean
+# on a JPG and writes a PNG + FNV-1a-64 hash. A near-twin on master
+# runs the IM-based algorithm and produces the same-format output so
+# we can compare byte-for-byte between the two branches.
+# ---------------------------------------------------------------------------
+add_executable(dump_binarize
+    tools/dump_binarize.cpp
+    src/im/binarize.cpp
+    src/im/imext.cpp
+    src/im/imbrink.cpp
+    src/im/imbrink3classes.cpp
+)
+target_include_directories(dump_binarize PRIVATE src)
+target_link_libraries(dump_binarize PRIVATE
+    im::im
+    opencv::opencv
+)
+if(WIN32)
+    target_link_options(dump_binarize PRIVATE /FORCE:MULTIPLE /IGNORE:4006 /IGNORE:4088)
 endif()
