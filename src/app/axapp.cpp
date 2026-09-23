@@ -272,10 +272,10 @@ bool AxApp::OnInit()
 
 
 	m_appPath = wxFileName(wxStandardPaths::Get().GetExecutablePath()).GetPath (wxPATH_GET_VOLUME);
-#if defined(__WXMSW__)
-    m_resourcesPath = m_appPath;
-#else // OS X
+#if defined(__WXMAC__)
 	m_resourcesPath = wxStandardPaths::Get().GetResourcesDir();
+#else // Windows and Linux: resources live next to the executable
+    m_resourcesPath = m_appPath;
 #endif
 
 #if defined(__linux__)

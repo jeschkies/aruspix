@@ -184,6 +184,48 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      # linuxdeploy bundles its own "appimage" output plugin (no
+      # separate appimagetool download needed); the gtk input plugin
+      # is a separate script that has to be discoverable on PATH.
+      # wxWidgets still links GTK/X11/etc. as dynamic system libraries
+      # even though Conan builds everything else statically (see the
+      # "Install system dependencies (Linux)" step above), so those
+      # need bundling for the AppImage to run on a foreign distro.
+      - name: Download linuxdeploy (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          curl -sL -o linuxdeploy.AppImage https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          curl -sL -o linuxdeploy-plugin-gtk.sh https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh
+          chmod +x linuxdeploy.AppImage linuxdeploy-plugin-gtk.sh
+
+      - name: Build AppImage (Linux)
+        if: runner.os == 'Linux'
+        # AppImage tooling normally mounts itself via FUSE, which
+        # isn't reliably present on the runner (newer Ubuntu dropped
+        # libfuse2 by default); extract-and-run instead.
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          mkdir -p AppDir/usr/bin
+          cp build/Release/aruspix AppDir/usr/bin/
+          cp -r data/. AppDir/usr/bin/
+          PATH="$PWD:$PATH" ./linuxdeploy.AppImage \
+            --appdir AppDir \
+            --executable AppDir/usr/bin/aruspix \
+            --desktop-file linux/aruspix.desktop \
+            --icon-file data/logo.png \
+            --icon-filename aruspix \
+            --plugin gtk \
+            --output appimage
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: aruspix-AppImage-${{ runner.arch }}
+          path: Aruspix*.AppImage
+          if-no-files-found: error
+          retention-days: 14
+
   license-drift:
     # data/THIRD_PARTY_LICENSES.txt and src/app/axthirdparty_generated.h
     # are generated from the Conan dependency graph (see
