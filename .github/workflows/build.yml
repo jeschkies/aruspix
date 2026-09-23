@@ -156,3 +156,48 @@ jobs:
           path: build/Release/aruspix*
           if-no-files-found: error
           retention-days: 14
+
+  license-drift:
+    # data/THIRD_PARTY_LICENSES.txt and src/app/axthirdparty_generated.h
+    # are generated from the Conan dependency graph (see
+    # tools/generate_third_party_notices.py). This job regenerates them
+    # and fails if that changes anything, which means conanfile.py's
+    # requirements moved without someone rerunning the script and
+    # committing the result. `conan graph info` only resolves the
+    # dependency graph, and the script covers all three shipped
+    # platforms from its own settings overrides, so this runs once on
+    # Linux rather than in the OS build matrix.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Conan
+        run: pip install --upgrade "conan>=2.0,<3"
+
+      - name: Cache Conan packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.conan2
+          key: conan-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('conanfile.py', 'recipes/**/conanfile.py') }}
+          restore-keys: |
+            conan-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Detect Conan profile
+        run: conan profile detect --force
+
+      - name: Regenerate third-party notices
+        run: python3 tools/generate_third_party_notices.py
+
+      - name: Fail on drift
+        run: |
+          if ! git diff --quiet -- data/THIRD_PARTY_LICENSES.txt src/app/axthirdparty_generated.h; then
+            echo "::error::data/THIRD_PARTY_LICENSES.txt and/or src/app/axthirdparty_generated.h are out of date with conanfile.py."
+            echo "::error::Run 'python3 tools/generate_third_party_notices.py' locally and commit the result."
+            git diff -- data/THIRD_PARTY_LICENSES.txt src/app/axthirdparty_generated.h
+            exit 1
+          fi

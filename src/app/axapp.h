@@ -151,6 +151,7 @@ public:
     wxStaticText* GetTxAppCopyright()  { return (wxStaticText*) FindWindow( TX_APP_COPYRIGHT ); }
     wxStaticText* GetTxAppLicense()  { return (wxStaticText*) FindWindow( TX_APP_LICENSE ); }
     wxTextCtrl* GetTxAppContributors()  { return (wxTextCtrl*) FindWindow( ID0_CONTRIBUTORS ); }
+    wxTextCtrl* GetTxAppThirdParty()  { return (wxTextCtrl*) FindWindow( ID0_THIRDPARTY ); }
     
 private:
     DECLARE_EVENT_TABLE()

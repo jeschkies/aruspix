@@ -84,25 +84,8 @@ wxSizer *AboutDlgFunc( wxWindow *parent, bool call_fit, bool set_sizer )
     wxStaticText *item14 = new wxStaticText( parent, ID0_TEXT, _("Credits"), wxDefaultPosition, wxDefaultSize, 0 );
     item5->Add( item14, 0, wxALIGN_CENTER_VERTICAL|wxLEFT|wxTOP, 5 );
 
-    wxWindow *item15 = parent->FindWindow( ID0_WXWIDGETS );
-    wxASSERT( item15 );
+    wxTextCtrl *item15 = new wxTextCtrl( parent, ID0_THIRDPARTY, wxT(""), wxDefaultPosition, wxSize(350,150), wxTE_MULTILINE|wxTE_READONLY );
     item5->Add( item15, 0, wxGROW|wxALIGN_CENTER_VERTICAL|wxLEFT|wxRIGHT|wxTOP, 5 );
-
-    wxWindow *item16 = parent->FindWindow( ID0_TORCH );
-    wxASSERT( item16 );
-    item5->Add( item16, 0, wxGROW|wxALIGN_CENTER_VERTICAL|wxLEFT|wxRIGHT|wxTOP, 5 );
-
-    wxWindow *item17 = parent->FindWindow( ID0_IM );
-    wxASSERT( item17 );
-    item5->Add( item17, 0, wxGROW|wxALIGN_CENTER_VERTICAL|wxLEFT|wxRIGHT|wxTOP, 5 );
-
-    wxWindow *item18 = parent->FindWindow( ID0_WG );
-    wxASSERT( item18 );
-    item5->Add( item18, 0, wxGROW|wxALIGN_CENTER_VERTICAL|wxLEFT|wxRIGHT|wxTOP, 5 );
-
-    wxWindow *item19 = parent->FindWindow( ID0_LIBMEI );
-    wxASSERT( item19 );
-    item5->Add( item19, 0, wxGROW|wxALIGN_CENTER_VERTICAL|wxLEFT|wxRIGHT|wxTOP, 5 );
 
     item5->Add( 350, 5, 0, wxALIGN_CENTER|wxALL, 5 );
 
