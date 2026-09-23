@@ -232,10 +232,6 @@ bool ImOperator::GetImagePlane( cv::Mat &image , int plane, int factor )
 
 bool ImOperator::GetImage( cv::Mat &image, int factor,  int binary_method, bool median_filtering )
 {
-    int color_type = IM_GRAY;
-    if ( binary_method != -1 )
-        color_type = IM_BINARY;
-
     if ( m_opImMap.empty() )
         return this->Terminate( ERR_UNKNOWN );
 

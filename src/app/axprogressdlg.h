@@ -21,6 +21,17 @@
 #define ERR_READING 5
 #define ERR_WRITING 6
 
+// No-op replacements for IM's counter API. The IM library was removed
+// but many long-running loops in src/im/*.cpp still spell out
+// imCounterTotal / imCounterInc as progress checkpoints. Rather than
+// churn every call site, keep them compiling with these header-only
+// stubs. Progress UI updates are now driven exclusively through
+// AxProgressDlg::Set{Operation,Job}(...).
+static inline void imCounterTotal(int /*counter*/, int /*total*/,
+                                  const char * /*text*/) {}
+static inline int  imCounterInc(int /*counter*/) { return 1; }
+static inline void imCounterEnd(int /*counter*/) {}
+
 #ifdef AX_CMDLINE
 
 #include "wx/string.h"
@@ -28,8 +39,6 @@
 //----------------------------------------------------------------------------
 // Commandline replacement class
 //----------------------------------------------------------------------------
-
-#include <im_counter.h>
 
 class AxProgressDlg
 {
@@ -59,9 +68,6 @@ public:
 #endif
 #include "wx/timer.h"
 #include "wx/datetime.h"
-
-// IMLIB
-#include <im_counter.h>
 
 #include "axapp_wdr.h"
 
@@ -99,14 +105,10 @@ public:
     wxStaticText* GetTxMsgOperation()  { return (wxStaticText*) FindWindow( ID_TX_MSG3_PROGRESS ); }
     wxStaticText* GetTxMsgJob()  { return (wxStaticText*) FindWindow( ID_TX_MSG2_PROGRESS ); }
     wxTextCtrl* GetTcLogProgress()  { return (wxTextCtrl*) FindWindow( ID_TC_LOG_PROGRESS ); }
-    // IM_LIB callback fonction as friend -> gere les barre de progression
-    friend int imDlgCounter(int counter, void* user_data, const char* text, int progress);
-    //
     void AxShowModal( bool failed = false ); // force show modal on os x
     void SuspendCounter();
     void ReactiveCounter();
     //bool IncOperation( ); // update gauge considering m_opBar et m_maxOpBar
-    //                      // le plus souvent cette barre est geree par imDlgCounter
     bool SetOperation( wxString msg );
     bool SetJob( wxString msg  );
 	void UpdateBatchBar( );
@@ -131,7 +133,7 @@ private:
     wxStopWatch m_stopWatch;
     long m_lastWatch;
     wxTimeSpan m_ts, m_old_ts;
-    int m_operationBar; // barre d'operation (3eme barre) // normalement geree par imDlgCounter
+    int m_operationBar; // barre d'operation (3eme barre)
     int m_jobBar; // barre du traitement (2eme barre)
     int m_batchBar; // barre du batch global (1ere barre)
     int m_maxOperationBar;
@@ -163,9 +165,6 @@ private:
     DECLARE_DYNAMIC_CLASS( AxProgressDlg )
     DECLARE_EVENT_TABLE()
 };
-
-// Callback function pour IMLIB
-int imDlgCounter(int counter, void* user_data, const char* text, int progress);
 
 #endif // AX_CMDLINE
 

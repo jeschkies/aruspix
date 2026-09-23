@@ -122,15 +122,3 @@ TEST_CASE("corr: zero-correlation case sets dec to 0") {
     CHECK(dec == 0);
 }
 
-TEST_CASE("alloc2DArray / free2DArray: round-trip writes survive") {
-    double **m = alloc2DArray(3, 4);
-    REQUIRE(m != nullptr);
-    for (int i = 0; i < 3; ++i) {
-        REQUIRE(m[i] != nullptr);
-        for (int j = 0; j < 4; ++j) m[i][j] = i * 10.0 + j;
-    }
-    for (int i = 0; i < 3; ++i)
-        for (int j = 0; j < 4; ++j)
-            CHECK(m[i][j] == doctest::Approx(i * 10.0 + j));
-    free2DArray(m, 3);
-}

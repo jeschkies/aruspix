@@ -19,20 +19,6 @@
 
 #include "app/axprogressdlg.h"
 
-// IMLIB — still needed while we bridge remaining IM library calls that
-// don't have clean cv::/ax:: replacements yet (bit-plane ops, file I/O,
-// rotate/resize/median convolve, etc.). Storage is cv::Mat; ImView
-// (below) adapts a cv::Mat to _imImage* in place for those call sites.
-#include <im.h>
-#include <im_counter.h>
-#include <im_image.h>
-#include <im_convert.h>
-#include <im_process.h>
-#include <im_util.h>
-#include <im_binfile.h>
-#include <im_math_op.h>
-#include <im_palette.h>
-
 #include "imext.h"
 
 #define MAX_STAVES 24
@@ -73,46 +59,6 @@ enum
 	IM_PRUNE_CLEAR_HEIGHT = 0,
 	IM_PRUNE_CLEAR_WIDTH,
 	IM_PRUNE_CLEAR_MIN
-};
-
-
-// ---------------------------------------------------------------------------
-// ImView — RAII adapter that wraps a cv::Mat as an _imImage* without copying.
-// The pixel buffer is shared with the source Mat; only the imImage header
-// is owned. `data[0]` is nulled on destruction so imImageDestroy() releases
-// the header but not the (Mat-owned) buffer.
-// ---------------------------------------------------------------------------
-
-class ImView
-{
-public:
-    // color_space: IM_GRAY, IM_BINARY, IM_MAP, IM_RGB, ...
-    // palette / palette_count: only meaningful for IM_MAP; pass nullptr/0 otherwise.
-    ImView(const cv::Mat &mat, int color_space, long *palette = nullptr, int palette_count = 0)
-    {
-        m_owns_data = false;
-        if (mat.empty()) { m_image = nullptr; return; }
-        // imImageInit expects a contiguous single-buffer layout; require that.
-        // (cv::Mat is contiguous after fresh allocation and after clone().)
-        m_image = imImageInit(mat.cols, mat.rows, color_space, IM_BYTE,
-                              const_cast<uchar*>(mat.data), palette, palette_count);
-    }
-    ~ImView()
-    {
-        if (m_image) {
-            if (!m_owns_data) m_image->data[0] = nullptr;
-            imImageDestroy(m_image);
-        }
-    }
-    ImView(const ImView&) = delete;
-    ImView &operator=(const ImView&) = delete;
-
-    operator _imImage*() const { return m_image; }
-    _imImage *get() const { return m_image; }
-
-private:
-    _imImage *m_image;
-    bool m_owns_data;
 };
 
 

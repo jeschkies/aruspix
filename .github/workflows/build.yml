@@ -73,9 +73,6 @@ jobs:
           touch ~/.conan2/global.conf
           grep -qxF "$LINE" ~/.conan2/global.conf || echo "$LINE" >> ~/.conan2/global.conf
 
-      - name: Export local IM recipe
-        run: conan export recipes/im
-
       # MSVC needs vcvars sourced before cl.exe is callable; the action
       # below makes it available to subsequent steps.
       - name: Set up MSVC (Windows)
