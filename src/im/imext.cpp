@@ -164,6 +164,130 @@ bool safe_crop(const cv::Mat& image, int *width, int *height,
 	return true;
 }
 
+void remove_by_area(const cv::Mat& src, cv::Mat& dst, int connectivity,
+                    int min_area, int max_area)
+{
+	if (src.empty() || src.type() != CV_8UC1) {
+		dst = src.clone();
+		return;
+	}
+	// Threshold to a 0/255 mask for connectedComponentsWithStats — it
+	// expects any non-zero value as foreground, but we normalize so the
+	// output preserves whatever foreground value (0/1 or 0/255) `src`
+	// used. We copy src into dst first, then zero the doomed labels.
+	if (&dst != &src) dst = src.clone();
+
+	cv::Mat labels, stats, centroids;
+	int n = cv::connectedComponentsWithStats(src, labels, stats, centroids,
+	                                          connectivity, CV_32S);
+	for (int label = 1; label < n; ++label) {
+		int area = stats.at<int>(label, cv::CC_STAT_AREA);
+		bool too_small = area < min_area;
+		bool too_big   = max_area > 0 && area > max_area;
+		if (too_small || too_big) {
+			cv::Mat mask = (labels == label);
+			dst.setTo(0, mask);
+		}
+	}
+}
+
+void bit_plane_extract(const cv::Mat& src, cv::Mat& dst, int plane)
+{
+	if (src.empty() || src.type() != CV_8UC1) return;
+	dst.create(src.rows, src.cols, CV_8UC1);
+	const uchar mask = (uchar)(1 << plane);
+	for (int y = 0; y < src.rows; ++y) {
+		const uchar* s = src.ptr<uchar>(y);
+		uchar*       d = dst.ptr<uchar>(y);
+		for (int x = 0; x < src.cols; ++x)
+			d[x] = (s[x] & mask) ? 1 : 0;
+	}
+}
+
+void bit_plane_reset(cv::Mat& image, int plane)
+{
+	if (image.empty() || image.type() != CV_8UC1) return;
+	cv::bitwise_and(image, cv::Scalar((uchar)~(1 << plane)), image);
+}
+
+void fill_holes(const cv::Mat& src, cv::Mat& dst, int connectivity)
+{
+	// Add a 1-pixel border of 0 (background) so cv::floodFill from a corner
+	// always starts on a background pixel that transitively touches the
+	// entire outer boundary. Fill the reachable background with a marker
+	// value (2), then any remaining 0's are enclosed holes: promote them
+	// to foreground.
+	cv::Mat padded;
+	cv::copyMakeBorder(src, padded, 1, 1, 1, 1,
+	                   cv::BORDER_CONSTANT, cv::Scalar(0));
+	cv::floodFill(padded, cv::Point(0, 0), cv::Scalar(2),
+	              nullptr, cv::Scalar(), cv::Scalar(), connectivity);
+
+	dst.create(src.rows, src.cols, CV_8UC1);
+	for (int y = 0; y < src.rows; ++y) {
+		const uchar* s = padded.ptr<uchar>(y + 1) + 1;
+		uchar* d = dst.ptr<uchar>(y);
+		for (int x = 0; x < src.cols; ++x)
+			d[x] = (s[x] == 2) ? 0 : 1;
+	}
+}
+
+void rotate_center(const cv::Mat& src, cv::Mat& dst,
+                   int new_w, int new_h,
+                   double cos0, double sin0, int order)
+{
+	// IM's imProcessRotate rotates around the source image centre and
+	// places the rotated content centred in an output of size (new_w, new_h).
+	// cv::getRotationMatrix2D produces the same M_IM = [cos sin; -sin cos]
+	// convention as an inverse (dst -> src) map, which is exactly what
+	// cv::warpAffine expects by default.
+	// CV_PI is defined by opencv2/core.hpp and works on MSVC where M_PI
+	// requires _USE_MATH_DEFINES.
+	const double angle_deg = std::atan2(sin0, cos0) * 180.0 / CV_PI;
+	cv::Point2f center(src.cols / 2.0f, src.rows / 2.0f);
+	cv::Mat M = cv::getRotationMatrix2D(center, angle_deg, 1.0);
+	M.at<double>(0, 2) += (new_w - src.cols) / 2.0;
+	M.at<double>(1, 2) += (new_h - src.rows) / 2.0;
+	const int interp = (order <= 0) ? cv::INTER_NEAREST
+	                 : (order == 1) ? cv::INTER_LINEAR
+	                 :                cv::INTER_CUBIC;
+	cv::warpAffine(src, dst, M, cv::Size(new_w, new_h),
+	               interp, cv::BORDER_CONSTANT, cv::Scalar(0));
+}
+
+void calc_rotate_size(int width, int height, int *new_width, int *new_height,
+                      double cos0, double sin0)
+{
+	// Port of imProcessCalcRotateSize (IM's src/process/im_geometric.cpp).
+	// Sample the four corner pixel-centres (+0.5) around the image midpoint,
+	// rotate each, then take the axis-aligned bounding box + 1-pixel pad.
+	const double wd2 = double(width) / 2.0;
+	const double hd2 = double(height) / 2.0;
+
+	auto rotate_transf = [&](int x, int y, double &xl, double &yl) {
+		double xr = x + 0.5 - wd2;
+		double yr = y + 0.5 - hd2;
+		xl = ( xr * cos0 + yr * sin0);
+		yl = (-xr * sin0 + yr * cos0);
+	};
+
+	double xl, yl;
+	rotate_transf(0, 0, xl, yl);
+	double xmin = xl, xmax = xl, ymin = yl, ymax = yl;
+
+	auto sample = [&](int x, int y) {
+		rotate_transf(x, y, xl, yl);
+		if (xl < xmin) xmin = xl; if (xl > xmax) xmax = xl;
+		if (yl < ymin) ymin = yl; if (yl > ymax) ymax = yl;
+	};
+	sample(width - 1, height - 1);
+	sample(0,         height - 1);
+	sample(width - 1, 0);
+
+	*new_width  = (int)(xmax - xmin + 2.0);
+	*new_height = (int)(ymax - ymin + 2.0);
+}
+
 }  // namespace ax
 
 // Delegate to ax::set_data. imImage carries a depth (per-plane count)

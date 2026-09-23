@@ -226,6 +226,7 @@ add_executable(aruspix_tests
     tests/test_imext_threshold.cpp
     tests/test_binarize.cpp
     tests/test_binarize_goldens.cpp
+    tests/test_image_ops.cpp
 )
 
 target_include_directories(aruspix_tests PRIVATE src/im)

@@ -30,15 +30,12 @@ ImStaffSegment::~ImStaffSegment()
 
 bool ImStaffSegment::AnalyzeSegment()
 {
-    wxASSERT_MSG( m_opImMap, wxT("MAP Image cannot be NULL") );
+    wxASSERT_MSG( !m_opImMap.empty(), wxT("MAP Image cannot be NULL") );
 
-    if ( !GetImagePlane( &m_opImMain ) )
+    if ( !GetImagePlane( m_opImMain ) )
         return false;
 
-    // Wrap the imImage's first plane as an in-place cv::Mat view.
-    // Everything below operates in cv::Mat land.
-    cv::Mat src(m_opImMain->height, m_opImMain->width, CV_8UC1,
-                m_opImMain->data[0]);
+    cv::Mat &src = m_opImMain;
 
     // 1-pixel background margin so components touching the edge don't
     // fuse with the border in the following morphological close.
