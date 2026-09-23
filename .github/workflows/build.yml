@@ -146,11 +146,17 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
             ls -lh build/Release/aruspix.exe
+          elif [ "$RUNNER_OS" = "macOS" ]; then
+            file build/Release/Aruspix.app/Contents/MacOS/aruspix
           else
             file build/Release/aruspix
           fi
 
+      # macOS's MACOSX_BUNDLE target has no loose build/Release/aruspix
+      # binary to speak of (see below); the .app bundle zip is its only
+      # artifact.
       - uses: actions/upload-artifact@v4
+        if: runner.os != 'macOS'
         with:
           name: aruspix-${{ runner.os }}-${{ runner.arch }}
           path: |
@@ -223,6 +229,27 @@ jobs:
         with:
           name: aruspix-AppImage-${{ runner.arch }}
           path: Aruspix*.AppImage
+          if-no-files-found: error
+          retention-days: 14
+
+      # cmake --build alone doesn't run install() rules, so the bundle
+      # in build/Release/ has no data/ or icon yet (see CMakeLists.txt)
+      # -- install to a clean prefix to materialize the full bundle
+      # before zipping it.
+      - name: Package app bundle (macOS)
+        if: runner.os == 'macOS'
+        run: cmake --install build/Release --prefix appdir
+
+      - name: Zip app bundle (macOS)
+        if: runner.os == 'macOS'
+        working-directory: appdir
+        run: ditto -c -k --sequesterRsrc --keepParent Aruspix.app ../Aruspix-macOS.zip
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'macOS'
+        with:
+          name: aruspix-app-${{ runner.arch }}
+          path: Aruspix-macOS.zip
           if-no-files-found: error
           retention-days: 14
 

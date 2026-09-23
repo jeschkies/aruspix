@@ -344,8 +344,9 @@ target_link_libraries(dump_binarize PRIVATE
 # ---------------------------------------------------------------------------
 # Windows installer (NSIS via CPack)
 #
-# macOS (.app + zip) and Linux (AppImage) packaging are handled outside
-# CMake and don't go through CPack, so this block is Windows-only.
+# Linux (AppImage) packaging needs system-library bundling that's
+# handled outside CMake entirely (see .github/workflows/build.yml), so
+# this block is Windows-only.
 # ---------------------------------------------------------------------------
 if(WIN32)
     install(TARGETS aruspix RUNTIME DESTINATION .)
@@ -382,4 +383,30 @@ if(WIN32)
     set(CPACK_NSIS_MODIFY_PATH OFF)
 
     include(CPack)
+endif()
+
+# ---------------------------------------------------------------------------
+# macOS .app bundle
+#
+# Zipping the bundle for distribution is a plain CI step (see
+# .github/workflows/build.yml), not a CMake/CPack concern.
+# ---------------------------------------------------------------------------
+if(APPLE)
+    set_target_properties(aruspix PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_BUNDLE_NAME "Aruspix"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "net.aruspix.Aruspix"
+        MACOSX_BUNDLE_BUNDLE_VERSION "2.4.0"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "2.4.0"
+        MACOSX_BUNDLE_ICON_FILE "ax.icns"
+    )
+
+    install(TARGETS aruspix BUNDLE DESTINATION .)
+
+    # AxApp resolves resources via wxStandardPaths::GetResourcesDir(),
+    # i.e. Contents/Resources, on macOS (see m_resourcesPath in
+    # axapp.cpp), unlike Windows/Linux where they sit next to the
+    # executable.
+    install(DIRECTORY data/ DESTINATION Aruspix.app/Contents/Resources)
+    install(FILES osx/ax.icns DESTINATION Aruspix.app/Contents/Resources)
 endif()
