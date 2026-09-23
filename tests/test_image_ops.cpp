@@ -65,6 +65,101 @@ TEST_CASE("remove_by_area: in-place is a no-op if the mat matches") {
     CHECK(img.at<uchar>(2, 2) == 0);
 }
 
+// ---------------------------------------------------------------------------
+// ax::set_data / ax::get_data — clamped paste/read, in either direction
+//
+// Regression coverage for a real crash: ImRegister::SubRegister (the
+// cv::dft-based registration's recursive step) used to paste/read at a
+// correlation-shifted offset with a raw cv::Rect, which throws when the
+// shift pushes the region past the target Mat's edge -- something that
+// happens in completely ordinary registrations (e.g. a small shift at a
+// border cell where the move origin is pinned to 0). set_data/get_data
+// clip instead of throwing, matching the forgiving behaviour the old
+// IM-based crop almost certainly had.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("set_data: fully in-bounds paste copies everything") {
+    cv::Mat img = cv::Mat::zeros(10, 10, CV_8UC1);
+    cv::Mat sel = cv::Mat::ones(3, 3, CV_8UC1) * 7;
+
+    ax::set_data(img, sel, 2, 2);
+
+    CHECK(cv::countNonZero(img) == 9);
+    CHECK(img.at<uchar>(2, 2) == 7);
+    CHECK(img.at<uchar>(4, 4) == 7);
+    CHECK(img.at<uchar>(1, 1) == 0);
+}
+
+TEST_CASE("set_data: negative offset clips instead of throwing") {
+    cv::Mat img = cv::Mat::zeros(10, 10, CV_8UC1);
+    cv::Mat sel = cv::Mat::ones(5, 5, CV_8UC1) * 9;
+
+    // Paste at (-2, -3): only the bottom-right 3x2 corner of `sel`
+    // should land, at the image's (0, 0).
+    ax::set_data(img, sel, -2, -3);
+
+    CHECK(img.at<uchar>(0, 0) == 9);
+    CHECK(img.at<uchar>(1, 2) == 9);
+    CHECK(cv::countNonZero(img) == 3 * 2);
+}
+
+TEST_CASE("set_data: oversize write is truncated to the image bounds") {
+    cv::Mat img = cv::Mat::zeros(5, 5, CV_8UC1);
+    cv::Mat sel = cv::Mat::ones(10, 10, CV_8UC1) * 3;
+
+    ax::set_data(img, sel, 2, 2);
+
+    CHECK(img.at<uchar>(2, 2) == 3);
+    CHECK(img.at<uchar>(4, 4) == 3);
+    CHECK(cv::countNonZero(img) == 3 * 3);  // only rows/cols 2..4 fit
+}
+
+TEST_CASE("set_data: fully out-of-range offset is a no-op") {
+    cv::Mat img = cv::Mat::zeros(5, 5, CV_8UC1);
+    cv::Mat sel = cv::Mat::ones(3, 3, CV_8UC1);
+
+    ax::set_data(img, sel, 100, 100);
+
+    CHECK(cv::countNonZero(img) == 0);
+}
+
+TEST_CASE("get_data: fully in-bounds read copies everything") {
+    cv::Mat img(10, 10, CV_8UC1, cv::Scalar(5));
+    cv::Mat sel = cv::Mat::zeros(3, 3, CV_8UC1);
+
+    ax::get_data(img, sel, 2, 2);
+
+    CHECK(cv::countNonZero(sel) == 9);
+    CHECK(sel.at<uchar>(0, 0) == 5);
+}
+
+TEST_CASE("get_data: negative offset reads only the in-bounds part") {
+    cv::Mat img(10, 10, CV_8UC1, cv::Scalar(9));
+    cv::Mat sel = cv::Mat::zeros(5, 5, CV_8UC1);  // pre-zeroed sentinel
+
+    // Read from (-2, -3): matches the border-shift case in SubRegister --
+    // only the part of `sel` whose source falls inside `img` gets
+    // written; the rest keeps its pre-existing (zeroed) content. The
+    // clipped-out offset (2, 3) lands the copied region at
+    // sel rows [3,5) x cols [2,5) -- Mat::at is (row, col) i.e. (y, x).
+    ax::get_data(img, sel, -2, -3);
+
+    CHECK(sel.at<uchar>(3, 2) == 9);   // in-bounds: copied
+    CHECK(sel.at<uchar>(4, 4) == 9);   // in-bounds: copied
+    CHECK(sel.at<uchar>(0, 0) == 0);   // out-of-bounds: left as sentinel
+    CHECK(sel.at<uchar>(2, 4) == 0);   // out-of-bounds: left as sentinel
+    CHECK(cv::countNonZero(sel) == 3 * 2);
+}
+
+TEST_CASE("get_data: fully out-of-range offset is a no-op") {
+    cv::Mat img(5, 5, CV_8UC1, cv::Scalar(9));
+    cv::Mat sel = cv::Mat::zeros(3, 3, CV_8UC1);
+
+    ax::get_data(img, sel, 100, 100);
+
+    CHECK(cv::countNonZero(sel) == 0);
+}
+
 TEST_CASE("remove_by_area: 4-connectivity treats diagonals as separate") {
     // Two 1-pixel components diagonally adjacent. With 4-connectivity
     // they are separate components (each area 1). With 8-connectivity

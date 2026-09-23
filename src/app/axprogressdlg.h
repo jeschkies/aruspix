@@ -54,7 +54,12 @@ public:
     void StartTimerOperation( int code, int nb_units = 1 ) {};
     void EndTimerOperation( int code ) {};
     bool IncTimerOperation( ) { return true; };
-    
+    // ImRegister::SubRegister brackets its correlation call with these;
+    // the GUI dialog uses them to pause its "still responsive" counter
+    // update, which has no equivalent without a dialog.
+    void SuspendCounter() {};
+    void ReactiveCounter() {};
+
 };
 
 #else

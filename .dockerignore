@@ -1,0 +1,9 @@
+# Keep the build context small -- the Dockerfile mounts the repo at run
+# time (see its usage comment) rather than COPYing sources in, so none of
+# this needs to be sent to the daemon.
+.git/
+build/
+*.zip
+tests/fixtures/sup_pages/
+tests/fixtures/actual/
+tests/fixtures/diff/

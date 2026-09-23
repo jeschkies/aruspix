@@ -15,6 +15,15 @@ namespace ax {
 void set_data(cv::Mat& image, const cv::Mat& selection,
               int pos_x, int pos_y);
 
+// Read direction counterpart of set_data(): copy the (selection.cols x
+// selection.rows) region of `image` at (pos_x, pos_y) into `selection`.
+// Clipped the same way — pixels of `selection` that would fall outside
+// `image` are left untouched, so zero (or otherwise initialise)
+// `selection` first if that matters to the caller. `image` and
+// `selection` must share the same channel count and element type.
+void get_data(const cv::Mat& image, cv::Mat& selection,
+              int pos_x, int pos_y);
+
 // Clip the axis-aligned rectangle (*pos_x, *pos_y, *width, *height)
 // against the extent of `image`. Adjusts the four in/out parameters
 // in place and returns true if the resulting rectangle is non-empty.

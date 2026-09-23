@@ -161,7 +161,14 @@ target_compile_definitions(aruspix PRIVATE
 )
 
 if(MSVC)
-    target_compile_options(aruspix PRIVATE /W3)
+    # /Z7 embeds debug info per-object instead of a shared vc*.pdb, which
+    # is what actually works under Ninja's parallel compilation (/Zi's
+    # shared pdb needs /FS or serializes access). /DEBUG makes the linker
+    # still emit a final aruspix.pdb from that so a Release crash offset
+    # (e.g. from Windows Event Viewer / WER) can be resolved to a
+    # function/line instead of staying an opaque address.
+    target_compile_options(aruspix PRIVATE /W3 /Z7)
+    target_link_options(aruspix PRIVATE /DEBUG)
 else()
     target_compile_options(aruspix PRIVATE -g -Wno-write-strings -Wno-format-security)
 endif()
@@ -231,6 +238,88 @@ target_link_libraries(aruspix_tests PRIVATE
 )
 
 add_test(NAME aruspix_tests COMMAND aruspix_tests)
+
+# ---------------------------------------------------------------------------
+# Integration tests (wx-coupled)
+#
+# aximage_loadfile_tests exercises AxImage::LoadFile (src/app/aximage.cpp)
+# on real, oversized scans to reproduce a reported Windows Superimposition
+# crash locally. Unlike aruspix_tests it links wxWidgets, so it gets its
+# own main (tests/test_aximage_loadfile_main.cpp) that sets up just enough
+# of wx (wxInitializer + image handlers) to decode PNGs without a full
+# wxApp/event loop. Fixtures are not committed; the test no-ops if
+# tests/fixtures/sup_pages/ is empty.
+# ---------------------------------------------------------------------------
+add_executable(aximage_loadfile_tests
+    src/app/aximage.cpp
+
+    tests/test_aximage_loadfile_main.cpp
+    tests/test_aximage_loadfile.cpp
+)
+
+target_include_directories(aximage_loadfile_tests PRIVATE src/app)
+
+target_compile_definitions(aximage_loadfile_tests PRIVATE
+    AX_SUP_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/sup_pages"
+)
+
+target_link_libraries(aximage_loadfile_tests PRIVATE
+    opencv::opencv
+    wxWidgets::wxWidgets
+    doctest::doctest
+)
+
+add_test(NAME aximage_loadfile_tests COMMAND aximage_loadfile_tests)
+
+# ---------------------------------------------------------------------------
+# imregister_integration_tests exercises the real ImRegister/ImPage
+# pipeline (Init -> DetectPoints -> Register) end to end against real
+# scan pairs -- the "Batch superimposition" code path, including the
+# cv::dft-ported cross-correlation. Built with -DAX_CMDLINE so
+# AxProgressDlg is the non-GUI stub (src/app/axprogressdlg.h) instead of
+# the real wxDialog; SupEnv's static config members are provided by
+# tests/support_sup_env_stub.cpp instead of linking the full GUI
+# src/superimposition/sup.cpp. Fixtures are not committed; every case
+# no-ops if tests/fixtures/sup_pages/ doesn't have the named files.
+# ---------------------------------------------------------------------------
+add_executable(imregister_integration_tests
+    src/im/imregister.cpp
+    src/im/impage.cpp
+    src/im/imstaff.cpp
+    src/im/imstaffsegment.cpp
+    src/im/imoperator.cpp
+    src/im/imext.cpp
+    src/im/imbrink.cpp
+    src/im/imbrink3classes.cpp
+    src/im/binarize.cpp
+    src/app/aximage.cpp
+    src/tinyxml/tinystr.cpp
+    src/tinyxml/tinyxml.cpp
+    src/tinyxml/tinyxmlerror.cpp
+    src/tinyxml/tinyxmlparser.cpp
+
+    tests/support_sup_env_stub.cpp
+    tests/test_imregister_integration_main.cpp
+    tests/test_imregister_integration.cpp
+)
+
+target_include_directories(imregister_integration_tests PRIVATE
+    src src/im src/app src/superimposition src/tinyxml
+)
+
+target_compile_definitions(imregister_integration_tests PRIVATE
+    AX_CMDLINE
+    AX_SUPERIMPOSITION
+    AX_SUP_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/sup_pages"
+)
+
+target_link_libraries(imregister_integration_tests PRIVATE
+    opencv::opencv
+    wxWidgets::wxWidgets
+    doctest::doctest
+)
+
+add_test(NAME imregister_integration_tests COMMAND imregister_integration_tests)
 
 # ---------------------------------------------------------------------------
 # Tools

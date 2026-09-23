@@ -1,4 +1,6 @@
 build/
+build_repro/
+ci_artifacts/
 third_party/
 compile_commands.json
 CMakeUserPresets.json
