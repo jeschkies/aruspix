@@ -153,7 +153,26 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: aruspix-${{ runner.os }}-${{ runner.arch }}
-          path: build/Release/aruspix*
+          path: |
+            build/Release/aruspix*
+            !build/Release/Aruspix-*.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      # windows-latest ships NSIS (makensis) preinstalled, so no extra
+      # setup step is needed here.
+      - name: Package installer (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        working-directory: build/Release
+        run: cpack -C Release
+
+      - name: Upload installer (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: aruspix-installer-${{ runner.os }}-${{ runner.arch }}
+          path: build/Release/Aruspix-*.exe
           if-no-files-found: error
           retention-days: 14
 

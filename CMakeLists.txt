@@ -340,3 +340,46 @@ target_include_directories(dump_binarize PRIVATE src)
 target_link_libraries(dump_binarize PRIVATE
     opencv::opencv
 )
+
+# ---------------------------------------------------------------------------
+# Windows installer (NSIS via CPack)
+#
+# macOS (.app + zip) and Linux (AppImage) packaging are handled outside
+# CMake and don't go through CPack, so this block is Windows-only.
+# ---------------------------------------------------------------------------
+if(WIN32)
+    install(TARGETS aruspix RUNTIME DESTINATION .)
+
+    # AxApp resolves resources relative to the executable's own directory
+    # on Windows (see m_resourcesPath in axapp.cpp), so data/ has to be
+    # installed flattened next to aruspix.exe rather than nested under a
+    # data/ subdirectory.
+    install(DIRECTORY data/ DESTINATION .)
+
+    # No-op today since Conan builds everything statically (DLLS is
+    # empty, same as the copy_runtime_dlls.cmake POST_BUILD step), but
+    # keeps the installer correct if that ever changes.
+    install(FILES $<TARGET_RUNTIME_DLLS:aruspix> DESTINATION . OPTIONAL)
+
+    set(CPACK_PACKAGE_NAME "Aruspix")
+    set(CPACK_PACKAGE_VENDOR "Aruspix")
+    set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Optical recognition, superimposition and collation of early music prints")
+    set(CPACK_PACKAGE_VERSION_MAJOR 2)
+    set(CPACK_PACKAGE_VERSION_MINOR 4)
+    set(CPACK_PACKAGE_VERSION_PATCH 0)
+    set(CPACK_PACKAGE_INSTALL_DIRECTORY "Aruspix")
+    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE.txt")
+    set(CPACK_PACKAGE_EXECUTABLES "aruspix" "Aruspix")
+
+    set(CPACK_GENERATOR "NSIS")
+    set(CPACK_NSIS_EXECUTABLES_DIRECTORY ".")
+    set(CPACK_NSIS_DISPLAY_NAME "Aruspix")
+    set(CPACK_NSIS_PACKAGE_NAME "Aruspix")
+    set(CPACK_NSIS_INSTALLED_ICON_NAME "aruspix.exe")
+    set(CPACK_NSIS_MUI_ICON "${CMAKE_SOURCE_DIR}/win32/ax.ico")
+    set(CPACK_NSIS_MUI_UNIICON "${CMAKE_SOURCE_DIR}/win32/ax.ico")
+    set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+    set(CPACK_NSIS_MODIFY_PATH OFF)
+
+    include(CPack)
+endif()
