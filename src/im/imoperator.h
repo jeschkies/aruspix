@@ -92,7 +92,7 @@ protected:
     virtual bool Terminate( int code = 0, ... );
     bool GetImagePlane( cv::Mat &image, int plane = 0, int factor = 1 );
     bool GetImage( cv::Mat &image, int factor = 1 , int binary_method = -1, bool median_filtering = false );
-    bool Read( wxString file, cv::Mat &image, int index );
+    bool Read( wxString file, cv::Mat &image, int index, bool forceGrayscale = true );
     bool Write( wxString file, const cv::Mat &image );
     bool WriteAsMAP( wxString file, cv::Mat &image );
 	bool ExtractPlane( cv::Mat &image, cv::Mat &extrated_plane, int plane_number  );
