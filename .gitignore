@@ -5,3 +5,6 @@ CMakeUserPresets.json
 *.o
 *.a
 .DS_Store
+
+# transient build log from `cmake --build` output redirection
+build.log
