@@ -8,14 +8,13 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
+// BRINK_AND_PENDOCK / LI_AND_LEE live here so existing callers of the
+// imProcessBrink*Threshold functions keep compiling unchanged.
+#include "thresholds.h"
+
 #if	defined(__cplusplus)
 extern "C" {
 #endif
-
-enum{
-	BRINK_AND_PENDOCK = 0,
-	LI_AND_LEE	
-};	
 
 struct _imImage;
 
@@ -47,8 +46,6 @@ void imAnalyzeProjectionH(const _imImage* image, int* hist);
 
 void imAnalyzeProjectionV(const _imImage* image, int* hist);
 
-void imAnalyzeMeasureMeanHeight(const _imImage* image, int* data_area, int region_count );
-
 void imAnalyzeClearHeight(const _imImage* image, int region_count, int min_threshold, int max_threshold );
 
 void imAnalyzeBoundingBoxes(const _imImage* image, int* boxes, int region_count );
@@ -61,8 +58,6 @@ int imProcessKittlerThreshold(const _imImage* image, _imImage* NewImage);
 
 int imProcessSauvolaThreshold( const _imImage* src, _imImage* dest,	int region_size,
 	float sensitivity = 0.5, int dynamic_range = 128, int lower_bound = 20, int upper_bound = 150, bool white_is_255 = true );
-	
-int imProcessPuginThreshold( const _imImage* src, _imImage* dest, bool white_is_255 = true );
 
 // implementation in im_brink.cpp
 int imProcessBrinkThreshold( const _imImage* src, _imImage* dest, bool white_is_255 = true );

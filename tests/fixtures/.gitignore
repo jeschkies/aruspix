@@ -1,0 +1,9 @@
+# Derived artifacts from tools/dump_binarize.cpp; regenerate with:
+#   for img in tests/fixtures/pages/*.jpg; do
+#     for m in brink brink3 sauvola fixed; do
+#       ./build/Release/dump_binarize "$img" $m tests/fixtures/actual/
+#     done
+#   done
+# (See tests/test_binarize_goldens.cpp for the reference workflow.)
+actual/
+diff/

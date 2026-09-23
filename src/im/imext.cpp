@@ -16,7 +16,9 @@ using std::min;
 using std::max;
 
 #include "imext.h"
-#include "imkmeans.h"
+#include "thresholds.h"
+#include "analyze.h"
+#include "image_ops.h"
 
 #include <im.h>
 #include <im_image.h>
@@ -25,6 +27,29 @@ using std::max;
 #include <im_util.h>
 #include <im_binfile.h>
 #include <im_counter.h>
+
+#include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
+
+namespace {
+
+// Wrap an imImage's first plane as an in-place cv::Mat view (no copy).
+// Currently we only need the IM_BYTE / IM_USHORT cases used by the
+// thresholding algorithms below; extend as more functions are migrated.
+inline cv::Mat as_mat(_imImage *image) {
+    int cv_type = (image->data_type == IM_USHORT) ? CV_16UC1 : CV_8UC1;
+    return cv::Mat(image->height, image->width, cv_type, image->data[0]);
+}
+inline cv::Mat as_mat(const _imImage *image) {
+    int cv_type = (image->data_type == IM_USHORT) ? CV_16UC1 : CV_8UC1;
+    // cv::Mat's data pointer is non-const, but imgproc treats input
+    // mats as const where it matters. The const_cast here mirrors how
+    // OpenCV's own InputArray adapters work.
+    return cv::Mat(image->height, image->width, cv_type,
+                   const_cast<void *>(image->data[0]));
+}
+
+}  // namespace
 
 // Function taken from im_convolve_rank.cpp in imlib
 template <class T, class DT> 
@@ -86,93 +111,87 @@ static int DoConvolveRankFunc(T *map, DT* new_map, int width, int height, int kw
 }
 
 
+namespace ax {
+
+void set_data(cv::Mat& image, const cv::Mat& selection,
+              int pos_x, int pos_y)
+{
+	if (image.empty() || selection.empty()) return;
+	if (image.type() != selection.type()) return;
+
+	int w = selection.cols;
+	int h = selection.rows;
+	int sel_pos_x = 0;
+	int sel_pos_y = 0;
+
+	if ((pos_x > image.cols) || (pos_y > image.rows)) return;
+
+	if (pos_x < 0) { w += pos_x; sel_pos_x = -pos_x; pos_x = 0; }
+	if (pos_y < 0) { h += pos_y; sel_pos_y = -pos_y; pos_y = 0; }
+
+	if (pos_x + w > image.cols) w = image.cols - pos_x;
+	if (pos_y + h > image.rows) h = image.rows - pos_y;
+
+	if ((w <= 0) || (h <= 0)) return;
+
+	cv::Rect dst_rect(pos_x, pos_y, w, h);
+	cv::Rect src_rect(sel_pos_x, sel_pos_y, w, h);
+	selection(src_rect).copyTo(image(dst_rect));
+}
+
+bool safe_crop(const cv::Mat& image, int *width, int *height,
+               int *pos_x, int *pos_y)
+{
+	int x = *pos_x;
+	int y = *pos_y;
+	int w = *width;
+	int h = *height;
+
+	if ((x > image.cols) || (y > image.rows)) return false;
+
+	if (x < 0) { w += x; x = 0; }
+	if (y < 0) { h += y; y = 0; }
+
+	if (x + w > image.cols) w = image.cols - x;
+	if (y + h > image.rows) h = image.rows - y;
+
+	if ((w <= 0) || (h <= 0)) return false;
+
+	*pos_x = x;
+	*pos_y = y;
+	*width = w;
+	*height = h;
+	return true;
+}
+
+}  // namespace ax
+
+// Delegate to ax::set_data. imImage carries a depth (per-plane count)
+// which cv::Mat expresses via channels; we iterate planes here for
+// the (rare) multi-plane case, wrapping each in an 8-bit view because
+// imSetData never inspected the element type beyond byte width.
 void imSetData( _imImage *image, _imImage *selection, int pos_x, int pos_y )
 {
-    int w = selection->width;
-    int h = selection->height;
-    int sel_pos_x = 0;
-    int sel_pos_y = 0;
-    
-	if ((pos_x > image->width) || (pos_y > image->height)) // we cannot copy outside the image
-		return;
-        
-    // first adjust the origine
-    if (pos_x < 0) { // move the origine and reduce the width
-        w += pos_x;
-        sel_pos_x = -pos_x;
-        pos_x = 0;
-    }    
-    if (pos_y < 0) { // idem
-        h += pos_y;
-        sel_pos_y = -pos_y;
-        pos_y = 0;
-    }
-    
-    // then adjust the with/height     
-	if (pos_x + w > image->width) {
-        w = image->width - pos_x;
-    } 
-    if (pos_y + h > image->height) {
-		h = image->height - pos_y;
-    }
-    
-	if ((w <= 0) || (h <= 0)) // we cannot copy nothing or less...
-		return;
-
+	if (image->depth != selection->depth) return;
 	int type_size = imDataTypeSize(image->data_type);
-	for (int i = 0; i < image->depth; i++)
-	{
-		imbyte *im_map = (imbyte*)image->data[i];
-		imbyte *sel_map = (imbyte*)selection->data[i];
-
-		for	(int y = 0; y < h ; y++)
-		{
-			int im_offset = (y + pos_y) * image->line_size + pos_x * type_size;
-			int sel_offset = (y + sel_pos_y) * selection->line_size + sel_pos_x * type_size;
-
-			memcpy(&im_map[im_offset], &sel_map[sel_offset], w * type_size);
-		}
+	int row_stride_bytes = image->width * type_size;
+	// Wrap each plane as an 8-bit Mat sized (height, width * type_size)
+	// so ax::set_data's copyTo works byte-for-byte, matching imSetData's
+	// original memcpy loop irrespective of the imImage element type.
+	for (int i = 0; i < image->depth; ++i) {
+		cv::Mat img_plane(image->height, image->width * type_size, CV_8UC1,
+		                  image->data[i]);
+		cv::Mat sel_plane(selection->height, selection->width * type_size,
+		                  CV_8UC1, selection->data[i]);
+		ax::set_data(img_plane, sel_plane, pos_x * type_size, pos_y);
 	}
 }
 
-
 bool imProcessSafeCrop( _imImage *image, int *width, int *height, int *pos_x, int *pos_y )
 {
-    int x = *pos_x;
-    int y = *pos_y;
-    int w = *width;
-    int h = *height;
-
-	if ((x > image->width) || (y > image->height)) // we cannot crop outside the image
-		return false;
-     
-    // first adjust the origine
-    if (x < 0) { // move the origine and reduce the width
-        w += x;
-        x = 0;
-    }    
-    if (y < 0) { // idem
-        h += y;
-        y = 0;
-    }
-    
-    // then adjust the with/height     
-	if (x + w > image->width) {
-        w = image->width - x;
-    } 
-    if (y + h > image->height) {
-		h = image->height - y;
-    }
-    
-	if ((w <= 0) || (h <= 0)) // we cannot nothing or less...
-		return false;
-        
-    // create the image
-    *pos_x = x;
-    *pos_y = y;
-    *width = w;
-    *height = h;
-    return true;
+	cv::Mat src(image->height, image->width, CV_8UC1,
+	            const_cast<void*>(image->data[0]));
+	return ax::safe_crop(src, width, height, pos_x, pos_y);
 }
 
 
@@ -365,25 +384,33 @@ void free2DArray( double **array, int x )
 	peak_val est la longueur du run le plus represente dans l'image
 	median_val est la longueur median de tous les runs
  */
-void imAnalyzeRuns(const imImage* image, int *peak_val, int *median_val, int type, bool vertical)
+namespace ax {
+
+void analyze_runs(const cv::Mat& src, int& peak_val, int& median_val,
+                  int type, bool vertical)
 {
-    imbyte *bufIm = (imbyte*)image->data[0];
+	if (src.type() != CV_8UC1) {
+		peak_val = 0;
+		median_val = 0;
+		return;
+	}
+	const imbyte *bufIm = src.data;
 	int h, w;
 	if ( vertical )
 	{
-		h = image->height;
-		w = image->width;
+		h = src.rows;
+		w = src.cols;
 	}
 	else
 	{
-		w = image->height;
-		h = image->width;		
+		w = src.rows;
+		h = src.cols;
 	}
-	
+
 	// runs
 	int* runs = (int*)malloc( h * w * sizeof(int) );
 	memset(runs, 0, h * w * sizeof(int) );
-	
+
 	// tableau compter les runs de chaque longueur (pour touver peak)
 	int* vals = (int*)malloc( h * sizeof(int) );
 	memset(vals, 0, h * sizeof(int) );
@@ -398,13 +425,13 @@ void imAnalyzeRuns(const imImage* image, int *peak_val, int *median_val, int typ
         run_val = 0;
         for (y = 0; y < h; y++)
         {
-            int offset; 
-			
+            int offset;
+
 			if (vertical)
 				offset = y * w + x;
 			else
 				offset = x * h + y;
-				
+
             if ( bufIm[ offset ] == run_type )
                 run_val++;
             else // changement
@@ -423,38 +450,67 @@ void imAnalyzeRuns(const imImage* image, int *peak_val, int *median_val, int typ
 
 	if ( i > 0 )
 	{
-		max_val( vals, h, peak_val );
-		(*median_val) = median( runs, i, false );
+		max_val( vals, h, &peak_val );
+		median_val = median( runs, i, false );
 	}
 	else
 	{
-		*peak_val = 0;
-		*median_val = 0;
+		peak_val = 0;
+		median_val = 0;
 	}
-	
+
 	free( runs );
 	free( vals );
+}
 
+}  // namespace ax
+
+void imAnalyzeRuns(const imImage* image, int *peak_val, int *median_val, int type, bool vertical)
+{
+	cv::Mat src(image->height, image->width, CV_8UC1,
+	            const_cast<void*>(image->data[0]));
+	ax::analyze_runs(src, *peak_val, *median_val, type, vertical);
 }
 
 /*
 	Calcule la projection horizontale d'une image
 	hist doit avoir la taille de la hauteur de l'image
  */
+namespace ax {
+
+void projection_h(const cv::Mat& src, std::vector<int>& hist)
+{
+	hist.assign(src.rows, 0);
+	if (src.type() != CV_8UC1) return;
+	for (int y = 0; y < src.rows; ++y) {
+		const imbyte *row = src.ptr<imbyte>(y);
+		int hist_val = 0;
+		for (int x = 0; x < src.cols; ++x)
+			hist_val += row[x];
+		hist[y] = hist_val;
+	}
+}
+
+void projection_v(const cv::Mat& src, std::vector<int>& hist)
+{
+	hist.assign(src.cols, 0);
+	if (src.type() != CV_8UC1) return;
+	for (int y = 0; y < src.rows; ++y) {
+		const imbyte *row = src.ptr<imbyte>(y);
+		for (int x = 0; x < src.cols; ++x)
+			hist[x] += row[x];
+	}
+}
+
+}  // namespace ax
+
 void imAnalyzeProjectionH(const imImage* image, int* hist)
 {
-	imbyte* img_data = (imbyte*)image->data[0];
-
-	for (int y = 0; y < image->height; y++)
-    {
-		int hist_val = 0;
- 		for (int x = 0; x < image->width; x++)
-		{
-			int offset = y * image->width + x;
-			hist_val += img_data[ offset ];
-		}
-		hist[y] = hist_val;
-    }
+	cv::Mat src(image->height, image->width, CV_8UC1,
+	            const_cast<void*>(image->data[0]));
+	std::vector<int> tmp;
+	ax::projection_h(src, tmp);
+	std::copy(tmp.begin(), tmp.end(), hist);
 }
 
 /*
@@ -463,19 +519,11 @@ void imAnalyzeProjectionH(const imImage* image, int* hist)
  */
 void imAnalyzeProjectionV(const imImage* image, int* hist)
 {
-	imbyte* img_data = (imbyte*)image->data[0];
-
-	for (int x = 0; x < image->width; x++)
-	{
-		int hist_val = 0;
- 		for (int y = 0; y < image->height; y++)
-		{
-			int offset = y * image->width + x;
-			hist_val += img_data[ offset ];
-
-		}
-		hist[x] = hist_val;
-	}
+	cv::Mat src(image->height, image->width, CV_8UC1,
+	            const_cast<void*>(image->data[0]));
+	std::vector<int> tmp;
+	ax::projection_v(src, tmp);
+	std::copy(tmp.begin(), tmp.end(), hist);
 }
 
 
@@ -485,35 +533,37 @@ void imAnalyzeProjectionV(const imImage* image, int* hist)
 	*image est une image labelisee (bg = 0, puis 1,2 ...)
 	region_count est le nombre de regions
  */
+namespace ax {
+
+void clear_height(cv::Mat& src, int region_count,
+                  int min_threshold, int max_threshold)
+{
+	if (src.type() != CV_16UC1 || region_count <= 0) return;
+
+	std::vector<int> heights(src.cols * region_count, 0);
+	const int count = src.rows * src.cols;
+	imushort *img_data = src.ptr<imushort>();
+	for (int i = 0; i < count; ++i) {
+		if (img_data[i])
+			heights[ (img_data[i] - 1) * src.cols + i % src.cols ]++;
+	}
+	for (int i = 0; i < count; ++i) {
+		if (img_data[i]) {
+			int h = heights[ (img_data[i] - 1) * src.cols + i % src.cols ];
+			if (h < min_threshold)
+				img_data[i] = 0;
+			else if (max_threshold && h > max_threshold)
+				img_data[i] = 0;
+		}
+	}
+}
+
+}  // namespace ax
+
 void imAnalyzeClearHeight(const imImage* image, int region_count, int min_threshold, int max_threshold )
 {
-	imushort* img_data = (imushort*)image->data[0];
-	int i;
-
-	// tableau pour les sommes par colonne, 1 largeur par region
-	int* heights = (int*)malloc( image->width * region_count * sizeof(int) );
-	memset(heights, 0, image->width * region_count * sizeof(int) );
-
-	for (i = 0; i < image->count; i++)
-	{
-		if (*img_data)
-			heights[ ((*img_data) - 1) * image->width + i % image->width ]++;
-		img_data++;
-	}
-
-	img_data = (imushort*)image->data[0];
-	for (i = 0; i < image->count; i++)
-	{
-		if (*img_data)
-		{
-			if ( heights[ ((*img_data) - 1) * image->width + i % image->width ] < min_threshold)
-				(*img_data) = 0;
-			else if ( max_threshold && (heights[ ((*img_data) - 1) * image->width + i % image->width ] > max_threshold) )
-				(*img_data) = 0;
-		}
-		img_data++;
-	}
-	free(heights);
+	cv::Mat src(image->height, image->width, CV_16UC1, image->data[0]);
+	ax::clear_height(src, region_count, min_threshold, max_threshold);
 }
 
 
@@ -522,27 +572,33 @@ void imAnalyzeClearHeight(const imImage* image, int region_count, int min_thresh
 	*image est une image labelisee (bg = 0, puis 1,2 ...)
 	region_count est le nombre de regions
  */
+namespace ax {
+
+void clear_min(cv::Mat& src, int region_count, int threshold)
+{
+	if (src.type() != CV_16UC1 || region_count <= 0) return;
+
+	std::vector<int> boxes;
+	bounding_boxes(src, boxes, region_count);
+
+	const int count = src.rows * src.cols;
+	imushort *img_data = src.ptr<imushort>();
+	for (int i = 0; i < count; ++i) {
+		if (img_data[i]) {
+			int j = (img_data[i] - 1) * 4;
+			if ((boxes[j+1] - boxes[j+0] < threshold) ||
+			    (boxes[j+3] - boxes[j+2] < threshold))
+				img_data[i] = 0;
+		}
+	}
+}
+
+}  // namespace ax
+
 void imAnalyzeClearMin(const imImage* image, int region_count, int threshold )
 {
-	imushort* img_data = (imushort*)image->data[0];
-	int i, j;
-
-	int* boxes = (int*)malloc(4 * region_count * sizeof(int));
-    memset(boxes, 0, 4 *  region_count * sizeof(int));
-    imAnalyzeBoundingBoxes(image, boxes, region_count);
-
-	img_data = (imushort*)image->data[0];
-	for (i = 0; i < image->count; i++)
-	{
-		if (*img_data)
-		{
-			j = ((*img_data) - 1) * 4;
-			if ( (boxes[j+1] - boxes[j+0] < threshold) || (boxes[j+3] - boxes[j+2] < threshold) )
-				(*img_data) = 0;
-		}
-		img_data++;
-	}
-	free( boxes );
+	cv::Mat src(image->height, image->width, CV_16UC1, image->data[0]);
+	ax::clear_min(src, region_count, threshold);
 }
 
 /*
@@ -551,35 +607,37 @@ void imAnalyzeClearMin(const imImage* image, int region_count, int threshold )
 	*image est une image labelisee (bg = 0, puis 1,2 ...)
 	region_count est le nombre de regions
  */
+namespace ax {
+
+void clear_width(cv::Mat& src, int region_count,
+                 int min_threshold, int max_threshold)
+{
+	if (src.type() != CV_16UC1 || region_count <= 0) return;
+
+	std::vector<int> widths(src.rows * region_count, 0);
+	const int count = src.rows * src.cols;
+	imushort *img_data = src.ptr<imushort>();
+	for (int i = 0; i < count; ++i) {
+		if (img_data[i])
+			widths[ (img_data[i] - 1) * src.rows + i / src.cols ]++;
+	}
+	for (int i = 0; i < count; ++i) {
+		if (img_data[i]) {
+			int w = widths[ (img_data[i] - 1) * src.rows + i / src.cols ];
+			if (w < min_threshold)
+				img_data[i] = 0;
+			else if (max_threshold && w > max_threshold)
+				img_data[i] = 0;
+		}
+	}
+}
+
+}  // namespace ax
+
 void imAnalyzeClearWidth(const imImage* image, int region_count, int min_threshold, int max_threshold )
 {
-	imushort* img_data = (imushort*)image->data[0];
-	int i;
-
-	// tableau pour les sommes par colonne, 1 largeur par region
-	int* widths = (int*)malloc( image->height * region_count * sizeof(int) );
-	memset(widths, 0, image->height * region_count * sizeof(int) );
-
-	for (i = 0; i < image->count; i++)
-	{
-		if (*img_data)
-			widths[ ((*img_data) - 1) * image->height + i / image->width ]++;
-		img_data++;
-	}
-
-	img_data = (imushort*)image->data[0];
-	for (i = 0; i < image->count; i++)
-	{
-		if (*img_data)
-		{
-			if ( widths[ ((*img_data) - 1) * image->height + i / image->width ] < min_threshold)
-				(*img_data) = 0;
-			else if ( max_threshold && (widths[ ((*img_data) - 1) * image->height + i / image->width ] > max_threshold) )
-				(*img_data) = 0;
-		}
-		img_data++;
-	}
-	free(widths);
+	cv::Mat src(image->height, image->width, CV_16UC1, image->data[0]);
+	ax::clear_width(src, region_count, min_threshold, max_threshold);
 }
 
 /*
@@ -588,42 +646,46 @@ void imAnalyzeClearWidth(const imImage* image, int region_count, int min_thresho
 	region_count est le nombre de regions
 	boxes est tableau des bounding boxes 4 * region_count : pour chaque region xmin xmax ymin ymax
  */
-void imAnalyzeBoundingBoxes(const imImage* image, int* boxes, int region_count )
-{
-	// boxes = tableau des bounding boxes
-	// 4 * region_count : pour chaque region xmin xmax ymin ymax
-	int i;
+namespace ax {
 
-	for (i = 0; i < region_count; i++)
-	{
-		boxes[4 * i + 0] = image->width;
-		boxes[4 * i + 2] = image->height;
+void bounding_boxes(const cv::Mat& src, std::vector<int>& boxes,
+                    int region_count)
+{
+	boxes.assign(4 * region_count, 0);
+	if (src.type() != CV_16UC1 || region_count <= 0) return;
+
+	for (int i = 0; i < region_count; ++i) {
+		boxes[4 * i + 0] = src.cols;
+		boxes[4 * i + 2] = src.rows;
 	}
 
-	imushort* img_data = (imushort*)image->data[0];
-
-	int x, y, idx;
-	for (i = 0; i < image->count; i++)
-	{
-		if (*img_data)
-		{
-			idx = ((*img_data) - 1) * 4;
-			x = i % image->width;
-			y = i / image->width;
-			if ( boxes[ idx + 0 ] > x ) 
-				boxes[ idx + 0 ] = x;
-			else if ( boxes[ idx + 1 ] < x ) 
-				boxes[ idx + 1 ] = x;
-			if ( boxes[ idx + 2 ] > y ) 
-				boxes[ idx + 2 ] = y;
-			else if ( boxes[ idx + 3 ] < y ) 
-				boxes[ idx + 3 ] = y;
+	const int count = src.rows * src.cols;
+	const imushort *img_data = src.ptr<imushort>();
+	for (int i = 0; i < count; ++i) {
+		if (img_data[i]) {
+			int idx = (img_data[i] - 1) * 4;
+			int x = i % src.cols;
+			int y = i / src.cols;
+			if (boxes[idx + 0] > x)      boxes[idx + 0] = x;
+			else if (boxes[idx + 1] < x) boxes[idx + 1] = x;
+			if (boxes[idx + 2] > y)      boxes[idx + 2] = y;
+			else if (boxes[idx + 3] < y) boxes[idx + 3] = y;
 		}
-		img_data++;
 	}
 }
 
-static unsigned char Kittler(const imImage* src_image, double *mu_1, double *mu_2, double *mu)
+}  // namespace ax
+
+void imAnalyzeBoundingBoxes(const imImage* image, int* boxes, int region_count )
+{
+	cv::Mat src(image->height, image->width, CV_16UC1,
+	            const_cast<void*>(image->data[0]));
+	std::vector<int> tmp;
+	ax::bounding_boxes(src, tmp, region_count);
+	std::copy(tmp.begin(), tmp.end(), boxes);
+}
+
+static unsigned char Kittler(const cv::Mat& src, double *mu_1, double *mu_2, double *mu)
 {
   unsigned long h[256];
   int threshold;
@@ -638,7 +700,16 @@ static unsigned char Kittler(const imImage* src_image, double *mu_1, double *mu_
   double sigma_1_T, sigma_2_T;
   double J_T;
 
-  imCalcHistogram(src_image, h, 0, 0);
+  {
+    int histSize = 256;
+    float range[] = {0.0f, 256.0f};
+    const float *histRange = range;
+    cv::Mat histMat;
+    cv::calcHist(&src, 1, /*channels=*/nullptr, cv::Mat(),
+                 histMat, 1, &histSize, &histRange);
+    for (int i = 0; i < 256; ++i)
+      h[i] = static_cast<unsigned long>(histMat.at<float>(i));
+  }
 
   criterion = 1e10;
   threshold = 127;
@@ -865,123 +936,93 @@ int imMeanAndStdDevFilter(const imImage *image, int region_size, float *means, f
 	return 1;
 }
 
+namespace ax {
+
+int sauvola_threshold(const cv::Mat& src_in, cv::Mat& dst, int region_size,
+                      float sensitivity, int dynamic_range,
+                      int lower_bound, int upper_bound, bool white_is_255)
+{
+	if ((region_size < 1) || (region_size > std::min(src_in.cols, src_in.rows)))
+		return 0;
+	if (src_in.type() != CV_8UC1)
+		return 0;
+
+	// Local mean / stddev via O(1)-per-pixel box filters (the previous
+	// IM-based implementation called imProcessCrop + imCalcImageStatistics
+	// once per output pixel — orders of magnitude slower).
+	cv::Mat src = src_in.clone();
+	if (!white_is_255) src = 255 - src;
+	cv::Mat src32f;
+	src.convertTo(src32f, CV_32F);
+
+	cv::Size kernel(region_size, region_size);
+	cv::Mat means, mean_of_sq, variance, stddev;
+	cv::boxFilter(src32f, means, CV_32F, kernel,
+	              cv::Point(-1, -1), /*normalize=*/true,
+	              cv::BORDER_REPLICATE);
+	cv::sqrBoxFilter(src32f, mean_of_sq, CV_32F, kernel,
+	                 cv::Point(-1, -1), /*normalize=*/true,
+	                 cv::BORDER_REPLICATE);
+	variance = mean_of_sq - means.mul(means);
+	cv::max(variance, 0.0, variance);
+	cv::sqrt(variance, stddev);
+
+	dst.create(src.rows, src.cols, CV_8UC1);
+	for (int y = 0; y < src.rows; ++y) {
+		const uchar *src_row = src.ptr<uchar>(y);
+		const float *mean_row = means.ptr<float>(y);
+		const float *std_row = stddev.ptr<float>(y);
+		uchar *dst_row = dst.ptr<uchar>(y);
+		for (int x = 0; x < src.cols; ++x) {
+			int pixel_value = src_row[x];
+			if (pixel_value < lower_bound) {
+				dst_row[x] = 1;  // black
+			} else if (pixel_value >= upper_bound) {
+				dst_row[x] = 0;  // white
+			} else {
+				float adjusted_deviation =
+				    std_row[x] / (float)dynamic_range - 1.0f;
+				float threshold =
+				    mean_row[x] + (1.0f + sensitivity * adjusted_deviation);
+				dst_row[x] = (pixel_value > threshold) ? 0 : 1;
+			}
+		}
+	}
+	return 1;
+}
+
+}  // namespace ax
+
 int imProcessSauvolaThreshold( const imImage* image, imImage* dest, int region_size,
 	float sensitivity, int dynamic_range, int lower_bound, int upper_bound, bool white_is_255 )
 {
-    if ((region_size < 1) || (region_size > min(image->width, image->height)))
-		return 0;
-	
-	imImage *src = imImageDuplicate( image );
-     
-	if ( !white_is_255 )
-		imProcessNegative( src, src );
-
-	float* means = (float*)malloc( src->height * src->width * sizeof( float ) );
-	memset( means, 0, src->height * src->width * sizeof( float ) );
-	float* std_dev = (float*)malloc( src->height * src->width * sizeof( float ) );
-	memset( std_dev, 0, src->height * src->width * sizeof( float ) );
-	
-	int counter = imCounterBegin("Sauvola threshold");
-	imCounterTotal(counter, src->size + src->height, "Sauvola threshold");
-
-	int ret = 0;
-    // Compute regional statistics.
-    ret = imMeanAndStdDevFilter(src, region_size, means, std_dev, counter );
-
-	imbyte* src_data = (imbyte*)src->data[0];
-	imbyte* dest_data = (imbyte*)dest->data[0];
-	
-	int offset, pixel_value;
-	float mean, deviation, adjusted_deviation, threshold;
-
-    for (int y = 0; y < src->height; y++) {
-		if ( !ret ) // aborted or error
-			break; 
-        for (int x = 0; x < src->width; x++) {
-			offset = y * src->width + x;
-			pixel_value = src_data[ offset ];
-            // Check global thresholds and then threshold adaptively.
-            if (pixel_value < lower_bound) {
-                dest_data[ offset ] = 1; // black, 1 in the destination image
-            } else if (pixel_value >= upper_bound) {
-                dest_data[ offset ] = 0; // white
-            } else {
-                mean = means[ offset ];
-                deviation = std_dev[ offset ];
-                adjusted_deviation
-                    = deviation / (float)dynamic_range - 1.0;
-                threshold
-                    = mean + (1.0 + sensitivity * adjusted_deviation);
-                dest_data[ offset ] = (pixel_value > threshold) ? 0 : 1;
-            }
-        }
-		ret = imCounterInc(counter);
-    }
-	imImageDestroy( src );
-    free(means);
-    free(std_dev);
-	imCounterEnd( counter );
-	return ret;
+	cv::Mat dst = as_mat(dest);
+	return ax::sauvola_threshold(as_mat(image), dst, region_size, sensitivity,
+	                             dynamic_range, lower_bound, upper_bound,
+	                             white_is_255);
 }
 
-int imProcessPuginThreshold(const imImage* image, imImage* dest, bool white_is_255 )
+namespace ax {
+
+int kittler_threshold(const cv::Mat& src, cv::Mat& dst)
 {
-	int i;
-	imImage *src = imImageDuplicate( image );
-     
-	if ( !white_is_255 )
-		imProcessNegative( src, src );
-
-	imImage *otsu_dest = imImageDuplicate( image );
-	int otsu = imProcessOtsuThreshold( src, otsu_dest );
-	int background = 255 - ((255 - otsu) / 2);
-	
-	int counter = imCounterBegin("Pugin threshold");
-	imCounterTotal(counter, 2*src->size, "Pugin threshold");	
-
-	imbyte* src_data = (imbyte*)src->data[0];
-	int ret = 1;
-	for( i = 0; i < src->size; i++ )
-	{
-		if ( !ret ) // aborted or error
-			break;
-	
-		if ((*src_data) > background)
-			(*src_data) = background;
-		src_data++;
-		ret = imCounterInc(counter);
-	}
-	imProcessExpandHistogram( src, src, 0.0 );
-	
-	//imbyte* mask = (imbyte*)malloc( src->size * sizeof( imbyte ) );
-	//memset( mask, 0, src->size * sizeof( imbyte ) );
-	src_data = (imbyte*)src->data[0];
-	imbyte* dest_data = (imbyte*)dest->data[0];
-	//double *means = kmeans( src_data, src->size, dest_data, 3);
-	for( i = 0; i < dest->size; i++ )
-	{
-		if ( !ret ) // aborted or error
-			break;
-			
-		if ((*dest_data) > 1)
-			(*dest_data) = 1; // white, 1 in the destination image
-		else
-			(*dest_data) = 0; // black, 0 in the destination image
-		dest_data++;
-		ret = imCounterInc(counter);
-	}
-	imCounterEnd( counter );
-	
-	return ret;
+  if (src.type() != CV_8UC1) return 0;
+  double dummy_1, dummy_2, dummy_3;
+  int level = ::Kittler(src, &dummy_1, &dummy_2, &dummy_3);
+  dst.create(src.rows, src.cols, CV_8UC1);
+  // imProcessThreshold semantics: dst = (src <= level) ? 0 : 1.
+  // cv::threshold with THRESH_BINARY: dst = (src > thresh) ? maxval : 0.
+  // Same behavior with thresh=level, maxval=1.
+  cv::threshold(src, dst, level, 1, cv::THRESH_BINARY);
+  return level;
 }
 
+}  // namespace ax
 
 int imProcessKittlerThreshold(const imImage* image, imImage* NewImage )
 {
-  double dummy_1, dummy_2, dummy_3;
-  int level = Kittler(image , &dummy_1, &dummy_2, &dummy_3);
-  imProcessThreshold(image, NewImage, level, 1);
-  return level;
+  cv::Mat dst = as_mat(NewImage);
+  return ax::kittler_threshold(as_mat(image), dst);
 }
 
 void imPhotogrammetric( const imImage* image, imImage* dest ){
