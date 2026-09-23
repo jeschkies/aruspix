@@ -74,8 +74,11 @@ AxProgressDlg::AxProgressDlg( wxWindow *parent, wxWindowID id, const wxString &t
     m_counter = -1;
 
 	AxProgressDlg::s_instance_existing = true;
-	
-	m_parent->Disable();
+
+	if ( m_parent )
+	{
+		m_parent->Disable();
+	}
 }
 
 AxProgressDlg::AxProgressDlg()  
@@ -88,8 +91,14 @@ AxProgressDlg::~AxProgressDlg()
 
 	wxASSERT_MSG( AxProgressDlg::s_instance_existing , "Single instance checker should be true" );
 	AxProgressDlg::s_instance_existing = false;
-	m_parent->Enable( true );
-	m_parent->SetFocus( );
+	// m_parent is a weak ref: the frame may already have been destroyed by
+	// the time we get here (e.g. a Windows session end bypasses the
+	// vetoable close event that normally keeps it alive during a batch).
+	if ( m_parent )
+	{
+		m_parent->Enable( true );
+		m_parent->SetFocus( );
+	}
 }
 
 void AxProgressDlg::AxShowModal( bool failed )

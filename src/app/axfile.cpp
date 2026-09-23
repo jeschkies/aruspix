@@ -291,8 +291,18 @@ bool AxFile::Save(  bool askUser )
 	m_xml_root = NULL;
 		
 	wxFFileOutputStream out( m_filename );
+	if ( !out.IsOk() )
+	{
+		// e.g. m_filename resolves to a directory we can't write to
+		// (a caller building it from an empty/invalid base path).
+		// wxZipOutputStream wrapping a stream that never opened has
+		// been observed to crash on Close()/destruction rather than
+		// failing cleanly, so bail out before constructing it.
+		wxLogError( _("Unable to open '%s' for writing"), m_filename.c_str() );
+		return false;
+	}
 	wxZipOutputStream zip(out);
-		
+
 	wxArrayString files;
 	wxDir::GetAllFiles( m_basename, &files, wxEmptyString, wxDIR_DEFAULT );
 	for( int i = files.GetCount() - 1; i >=0; i-- )

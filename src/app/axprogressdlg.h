@@ -73,6 +73,7 @@ public:
 #endif
 #include "wx/timer.h"
 #include "wx/datetime.h"
+#include "wx/weakref.h"
 
 #include "axapp_wdr.h"
 
@@ -149,7 +150,7 @@ private:
     //time operation
     int m_timer_units;
     long m_timer_start;
-	wxWindow *m_parent;
+	wxWeakRef<wxWindow> m_parent;
 
 
     // values are in milliseconds second per units

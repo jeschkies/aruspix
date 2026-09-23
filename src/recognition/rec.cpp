@@ -974,12 +974,15 @@ void RecEnv::OnBookRecognize( wxCommandEvent &event )
     if ( !m_recBookFilePtr->IsOpened() )
         return;
 
-    if ( m_recBookFilePtr->IsModified() )
-        m_recBookFilePtr->Save();
+    // See OnBookPreprocess for why an ignored/failed Save() here would
+    // send every per-page save to a bogus path built from an empty
+    // m_axFileDir.
+    if ( m_recBookFilePtr->IsModified() && !m_recBookFilePtr->Save() )
+        return;
 
     wxArrayString paths, filenames;
     size_t nbOfFiles;
-    
+
     nbOfFiles = m_recBookFilePtr->FilesToRecognize( &filenames, &paths );
     if ( nbOfFiles == 0 )
     {
@@ -1053,9 +1056,14 @@ void RecEnv::OnBookPreprocess( wxCommandEvent &event )
         
     if ( !m_recBookFilePtr->IsOpened() )
         return;
-    
-    if ( m_recBookFilePtr->IsModified() )
-        m_recBookFilePtr->Save();
+
+    // If the book has never been saved, Save() redirects to SaveAs(),
+    // which prompts for a location; cancelling that leaves m_axFileDir
+    // empty ("" + path separator == "/"), so every per-page save below
+    // would target the filesystem root instead of a real directory.
+    // Bail out rather than batch-processing into a bogus location.
+    if ( m_recBookFilePtr->IsModified() && !m_recBookFilePtr->Save() )
+        return;
 
     wxArrayString paths, filenames;
     size_t nbOfFiles;

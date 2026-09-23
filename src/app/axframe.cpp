@@ -756,6 +756,24 @@ void AxFrame::OnQuit( wxCommandEvent &event )
 
 void AxFrame::OnClose( wxCloseEvent &event )
 {
+    // A long-running batch operation (e.g. Batch superimposition/
+    // recognition) keeps an AxProgressDlg alive whose m_parent points
+    // back at this frame; the operation pumps the event loop (so its
+    // Cancel button and gauge stay responsive), which is exactly what
+    // lets a close request reach here before the batch finishes. If we
+    // let the frame close anyway, m_parent is left dangling and later
+    // crashes when ~AxProgressDlg() unconditionally calls
+    // m_parent->Enable()/SetFocus() -- there is no safe way to validate
+    // a raw pointer that may already be freed, so the only real fix is
+    // to refuse the close while it's still in use (this frame already
+    // calls m_parent->Disable() for the same reason, just not for the
+    // close button/Alt+F4/system close).
+    if ( AxProgressDlg::s_instance_existing )
+    {
+        event.Veto();
+        return;
+    }
+
     int lastEnvId = 0, i;
     if (m_env && m_env->m_isShown)
     {

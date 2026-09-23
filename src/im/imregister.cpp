@@ -95,7 +95,9 @@ bool ImRegister::Load( TiXmlElement *file_root )
 		failed = (!wxFileExists( m_path + "src2.tif" ) || !Read( m_path + "src2.tif", m_src2, 0 ));
 
     if ( !failed )
-		failed = (!wxFileExists( m_path + "result.tif" ) || !Read( m_path + "result.tif", m_result, 0 ));
+		// m_result is a colour (BGR) red/green diff overlay, not a page
+		// scan -- forceGrayscale=false keeps Read() from flattening it.
+		failed = (!wxFileExists( m_path + "result.tif" ) || !Read( m_path + "result.tif", m_result, 0, false ));
 
 	/*  load more data ?
     TiXmlElement *root = NULL;

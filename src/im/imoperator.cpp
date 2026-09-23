@@ -117,7 +117,7 @@ void ImOperator::SetMapImage( const cv::Mat &image )
     m_opImMap = image.clone();
 }
 
-bool ImOperator::Read( wxString file, cv::Mat &image, int index )
+bool ImOperator::Read( wxString file, cv::Mat &image, int index, bool forceGrayscale )
 {
 	wxASSERT_MSG( !file.IsEmpty(), "Filename  cannot be empty" );
     (void)index; // legacy multi-image TIFF index; cv::imread reads first only
@@ -137,12 +137,24 @@ bool ImOperator::Read( wxString file, cv::Mat &image, int index )
     // Normalise multi-channel input (BGR / BGRA) to grayscale so downstream
     // code always sees single-channel 8-bit buffers. cv::cvtColor uses
     // Rec.601 weights, matching IM's imConvertColorSpace conversion.
-    if ( loaded.channels() >= 3 ) {
+    // Callers that persist a genuinely colour image (e.g. ImRegister's
+    // red/green diff result) pass forceGrayscale=false to keep it intact.
+    if ( forceGrayscale && loaded.channels() >= 3 ) {
         cv::cvtColor(loaded, image, loaded.channels() == 4 ? cv::COLOR_BGRA2GRAY
                                                             : cv::COLOR_BGR2GRAY);
+    } else if ( loaded.channels() == 4 ) {
+        cv::cvtColor(loaded, image, cv::COLOR_BGRA2BGR);
     } else {
         image = loaded;
     }
+
+    // cv::imread always returns top-down (top-left origin) data, but every
+    // internal buffer downstream (m_opIm/m_img0/m_src1/...) is bottom-left
+    // origin, matching the old IM library's imFileLoadBitmap convention
+    // (see aximage.h/cpp). Flip once here to restore that invariant --
+    // otherwise GetCvMat/SetCvMat's display-boundary flip ends up mirroring
+    // the image vertically on screen.
+    cv::flip(image, image, 0);
     return true;
 }
 
@@ -196,10 +208,15 @@ bool ImOperator::Write( wxString file, const cv::Mat &image )
 {
 	wxASSERT_MSG( !file.IsEmpty(), "Filename  cannot be empty" );
 
+    // image is bottom-left origin (see Read()); flip back to top-down
+    // before handing it to cv::imwrite, which always writes top-down.
+    cv::Mat flipped;
+    cv::flip(image, flipped, 0);
+
     // cv::imwrite chooses the codec by extension. TIFF is compressed via
     // libtiff's default (LZW); the pre-swap RLE ("packbits") was chosen for
     // historical compatibility with IM and offers no meaningful advantage.
-    if ( !cv::imwrite( (const char*)file.c_str(), image ) )
+    if ( !cv::imwrite( (const char*)file.c_str(), flipped ) )
         return this->Terminate( ERR_WRITING, (const char*)file.c_str() );
     return true;
 }
