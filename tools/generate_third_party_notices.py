@@ -7,16 +7,26 @@ Rerun this after changing conanfile.py's requirements:
 
     python3 tools/generate_third_party_notices.py
 
+The graph is resolved against the lockfiles in conan-locks/, not live
+against Conan Center, so this is fully reproducible: an unrelated
+recipe getting a new revision upstream (e.g. expat 2.8.4 -> 2.8.5)
+can't change the output between two runs. If conanfile.py's
+requirements actually changed, refresh the lockfiles first:
+
+    python3 tools/generate_third_party_notices.py --refresh-lockfiles
+
 Requires `conan` on PATH; only resolves the dependency graph (no
 building), so it works even without a local Conan cache of built
 binaries.
 """
+import argparse
 import json
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+LOCKS_DIR = ROOT / "conan-locks"
 
 # aruspix is the root package, not a third party. doctest only links
 # into the test binaries (aruspix_tests, aximage_loadfile_tests,
@@ -28,14 +38,22 @@ EXCLUDE_NAMES = {"aruspix", "doctest"}
 # their native GUI backends there; Linux additionally pulls in the
 # GTK/X11/Wayland stack via wxWidgets' GTK backend.
 PLATFORMS = {
-    "Linux": {"os": "Linux", "arch": "x86_64"},
-    "Windows": {"os": "Windows", "arch": "x86_64"},
-    "macOS": {"os": "Macos", "arch": "armv8"},
+    "Linux": {"settings": {"os": "Linux", "arch": "x86_64"}, "lockfile": LOCKS_DIR / "linux.lock"},
+    "Windows": {"settings": {"os": "Windows", "arch": "x86_64"}, "lockfile": LOCKS_DIR / "windows.lock"},
+    "macOS": {"settings": {"os": "Macos", "arch": "armv8"}, "lockfile": LOCKS_DIR / "macos.lock"},
 }
 
 
-def conan_graph(settings):
-    args = ["conan", "graph", "info", str(ROOT), "--format=json"]
+def refresh_lockfile(settings, lockfile):
+    args = ["conan", "lock", "create", str(ROOT), f"--lockfile-out={lockfile}"]
+    for key, value in settings.items():
+        args += ["-s", f"{key}={value}"]
+    print(f"refreshing {lockfile}...", file=sys.stderr)
+    subprocess.run(args, check=True, capture_output=True, text=True)
+
+
+def conan_graph(settings, lockfile):
+    args = ["conan", "graph", "info", str(ROOT), "--format=json", f"--lockfile={lockfile}"]
     for key, value in settings.items():
         args += ["-s", f"{key}={value}"]
     result = subprocess.run(args, capture_output=True, text=True, check=True)
@@ -122,10 +140,21 @@ def write_credits_header(per_platform):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--refresh-lockfiles",
+        action="store_true",
+        help="Re-resolve conan-locks/*.lock against Conan Center first "
+        "(only needed after changing conanfile.py's requirements).",
+    )
+    args = parser.parse_args()
+
     per_platform = {}
-    for platform, settings in PLATFORMS.items():
+    for platform, config in PLATFORMS.items():
+        if args.refresh_lockfiles:
+            refresh_lockfile(config["settings"], config["lockfile"])
         print(f"resolving Conan graph for {platform}...", file=sys.stderr)
-        graph = conan_graph(settings)
+        graph = conan_graph(config["settings"], config["lockfile"])
         per_platform[platform] = host_dependencies(graph)
 
     write_licenses_txt(per_platform)
