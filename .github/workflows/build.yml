@@ -208,9 +208,13 @@ jobs:
         if: runner.os == 'Linux'
         # AppImage tooling normally mounts itself via FUSE, which
         # isn't reliably present on the runner (newer Ubuntu dropped
-        # libfuse2 by default); extract-and-run instead.
+        # libfuse2 by default); extract-and-run instead. The gtk
+        # plugin can't auto-detect the GTK version wxWidgets actually
+        # uses (confirmed GTK 3 via conan graph info), so it has to be
+        # told explicitly.
         env:
           APPIMAGE_EXTRACT_AND_RUN: "1"
+          DEPLOY_GTK_VERSION: "3"
         run: |
           mkdir -p AppDir/usr/bin
           cp build/Release/aruspix AppDir/usr/bin/
