@@ -301,6 +301,7 @@ add_executable(imregister_integration_tests
     tests/support_sup_env_stub.cpp
     tests/test_imregister_integration_main.cpp
     tests/test_imregister_integration.cpp
+    tests/test_dist_by_correlation.cpp
 )
 
 target_include_directories(imregister_integration_tests PRIVATE

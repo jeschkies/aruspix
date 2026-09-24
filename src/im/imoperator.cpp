@@ -403,18 +403,29 @@ void ImOperator::DistByCorrelation( const cv::Mat &im1,  const cv::Mat &im2,
     cv::Mat corr;
     cv::idft(cross_spec, corr, cv::DFT_SCALE | cv::DFT_REAL_OUTPUT);
 
-    // FFT-shift to bring the zero-shift origin from (0,0) to (w/2, h/2).
+    // FFT-shift to bring the zero-shift origin from (0,0) to (w/2, h/2)
+    // (hw, hh below -- both floor division, matching the crop below).
+    // For an odd cols/rows, the "other" half is one pixel bigger than
+    // hw/hh, so the swapped quadrants are NOT the same size as their
+    // destination: e.g. splitting cols as [0, hw) / [hw, cols) and
+    // swapping those two blocks as-is puts corr(0,0) at corr_shift(hw+1),
+    // not corr_shift(hw) -- one pixel off from where the crop below
+    // assumes it is. sw/sh (the "other", ceil-sized half) fix this by
+    // using the correct size for each swapped block, independent of
+    // parity.
     const int hw = corr.cols / 2;
     const int hh = corr.rows / 2;
+    const int sw = corr.cols - hw;
+    const int sh = corr.rows - hh;
     cv::Mat corr_shift(corr.size(), corr.type());
-    corr(cv::Rect(hw, hh, corr.cols - hw, corr.rows - hh))
-        .copyTo(corr_shift(cv::Rect(0, 0, corr.cols - hw, corr.rows - hh)));
-    corr(cv::Rect(0, hh, hw, corr.rows - hh))
-        .copyTo(corr_shift(cv::Rect(corr.cols - hw, 0, hw, corr.rows - hh)));
-    corr(cv::Rect(hw, 0, corr.cols - hw, hh))
-        .copyTo(corr_shift(cv::Rect(0, corr.rows - hh, corr.cols - hw, hh)));
-    corr(cv::Rect(0, 0, hw, hh))
-        .copyTo(corr_shift(cv::Rect(corr.cols - hw, corr.rows - hh, hw, hh)));
+    corr(cv::Rect(sw, sh, hw, hh))
+        .copyTo(corr_shift(cv::Rect(0, 0, hw, hh)));
+    corr(cv::Rect(0, sh, sw, hh))
+        .copyTo(corr_shift(cv::Rect(hw, 0, sw, hh)));
+    corr(cv::Rect(sw, 0, hw, sh))
+        .copyTo(corr_shift(cv::Rect(0, hh, hw, sh)));
+    corr(cv::Rect(0, 0, sw, sh))
+        .copyTo(corr_shift(cv::Rect(hw, hh, sw, sh)));
 
     // Crop the window around the (now-centred) origin.
     const int cw = window.GetWidth()  * 2 + 1;
