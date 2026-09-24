@@ -3,6 +3,7 @@ name: Build
 on:
   push:
     branches: [master]
+    tags: ["v*"]
   pull_request:
     branches: [master]
   workflow_dispatch:
@@ -18,6 +19,23 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # Packages are named Aruspix_<version>.<ext>: the pushed tag when
+      # it's a release (vX.Y.Z, e.g. v0.0.1), otherwise the short commit
+      # hash (e.g. deadbeef). git rev-parse works fine on the shallow
+      # checkout above since it only needs HEAD's own commit object.
+      - name: Compute package version
+        id: version
+        shell: bash
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$REF_TYPE" = "tag" ] && [[ "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "version=$REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          fi
 
       # uuid is the only system library Aruspix links directly that Conan
       # doesn't see. Everything else (GTK, X11, xcb, OpenGL, ...) is
@@ -122,11 +140,13 @@ jobs:
       # to Win32 and produce an x86/x64 link mismatch.
       - name: Configure
         shell: bash
+        env:
+          AX_PACKAGE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            cmd //c "build\\Release\\generators\\conanbuild.bat && cmake --preset conan-release"
+            cmd //c "build\\Release\\generators\\conanbuild.bat && cmake --preset conan-release -DAX_PACKAGE_VERSION=$AX_PACKAGE_VERSION"
           else
-            cmake --preset conan-release
+            cmake --preset conan-release -DAX_PACKAGE_VERSION=$AX_PACKAGE_VERSION
           fi
 
       - name: Build
@@ -161,7 +181,7 @@ jobs:
           name: aruspix-${{ runner.os }}-${{ runner.arch }}
           path: |
             build/Release/aruspix*
-            !build/Release/Aruspix-*.exe
+            !build/Release/Aruspix_*.exe
           if-no-files-found: error
           retention-days: 14
 
@@ -177,6 +197,8 @@ jobs:
 
       - name: Package installer (Windows)
         if: runner.os == 'Windows'
+        # AX_PACKAGE_VERSION was already baked into CPackConfig.cmake
+        # by the Configure step above.
         shell: bash
         working-directory: build/Release
         run: cpack -C Release
@@ -186,7 +208,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: aruspix-installer-${{ runner.os }}-${{ runner.arch }}
-          path: build/Release/Aruspix-*.exe
+          path: build/Release/Aruspix_*.exe
           if-no-files-found: error
           retention-days: 14
 
@@ -215,6 +237,7 @@ jobs:
         env:
           APPIMAGE_EXTRACT_AND_RUN: "1"
           DEPLOY_GTK_VERSION: "3"
+          AX_PACKAGE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           mkdir -p AppDir/usr/bin
           cp build/Release/aruspix AppDir/usr/bin/
@@ -227,12 +250,13 @@ jobs:
             --icon-filename aruspix \
             --plugin gtk \
             --output appimage
+          mv Aruspix-*.AppImage "Aruspix_${AX_PACKAGE_VERSION}.AppImage"
 
       - uses: actions/upload-artifact@v4
         if: runner.os == 'Linux'
         with:
           name: aruspix-AppImage-${{ runner.arch }}
-          path: Aruspix*.AppImage
+          path: Aruspix_*.AppImage
           if-no-files-found: error
           retention-days: 14
 
@@ -247,13 +271,15 @@ jobs:
       - name: Zip app bundle (macOS)
         if: runner.os == 'macOS'
         working-directory: appdir
-        run: ditto -c -k --sequesterRsrc --keepParent Aruspix.app ../Aruspix-macOS.zip
+        env:
+          AX_PACKAGE_VERSION: ${{ steps.version.outputs.version }}
+        run: ditto -c -k --sequesterRsrc --keepParent Aruspix.app "../Aruspix_${AX_PACKAGE_VERSION}.zip"
 
       - uses: actions/upload-artifact@v4
         if: runner.os == 'macOS'
         with:
           name: aruspix-app-${{ runner.arch }}
-          path: Aruspix-macOS.zip
+          path: Aruspix_*.zip
           if-no-files-found: error
           retention-days: 14
 

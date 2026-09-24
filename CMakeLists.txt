@@ -372,6 +372,15 @@ if(WIN32)
     set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE.txt")
     set(CPACK_PACKAGE_EXECUTABLES "aruspix" "Aruspix")
 
+    # Short commit hash or vX.Y.Z tag, passed in by CI (see
+    # .github/workflows/build.yml); "dev" for a plain local build.
+    # Setting CPACK_PACKAGE_FILE_NAME explicitly, rather than leaving it
+    # to CPack's ${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION} default,
+    # also suppresses the "-win64" CPACK_SYSTEM_NAME suffix CPack would
+    # otherwise append.
+    set(AX_PACKAGE_VERSION "dev" CACHE STRING "Version suffix for the installer filename")
+    set(CPACK_PACKAGE_FILE_NAME "Aruspix_${AX_PACKAGE_VERSION}")
+
     set(CPACK_GENERATOR "NSIS")
     set(CPACK_NSIS_EXECUTABLES_DIRECTORY ".")
     set(CPACK_NSIS_DISPLAY_NAME "Aruspix")
