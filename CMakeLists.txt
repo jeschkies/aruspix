@@ -340,3 +340,82 @@ target_include_directories(dump_binarize PRIVATE src)
 target_link_libraries(dump_binarize PRIVATE
     opencv::opencv
 )
+
+# ---------------------------------------------------------------------------
+# Windows installer (NSIS via CPack)
+#
+# Linux (AppImage) packaging needs system-library bundling that's
+# handled outside CMake entirely (see .github/workflows/build.yml), so
+# this block is Windows-only.
+# ---------------------------------------------------------------------------
+if(WIN32)
+    install(TARGETS aruspix RUNTIME DESTINATION .)
+
+    # AxApp resolves resources relative to the executable's own directory
+    # on Windows (see m_resourcesPath in axapp.cpp), so data/ has to be
+    # installed flattened next to aruspix.exe rather than nested under a
+    # data/ subdirectory.
+    install(DIRECTORY data/ DESTINATION .)
+
+    # No-op today since Conan builds everything statically (DLLS is
+    # empty, same as the copy_runtime_dlls.cmake POST_BUILD step), but
+    # keeps the installer correct if that ever changes.
+    install(FILES $<TARGET_RUNTIME_DLLS:aruspix> DESTINATION . OPTIONAL)
+
+    set(CPACK_PACKAGE_NAME "Aruspix")
+    set(CPACK_PACKAGE_VENDOR "Aruspix")
+    set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Optical recognition, superimposition and collation of early music prints")
+    set(CPACK_PACKAGE_VERSION_MAJOR 2)
+    set(CPACK_PACKAGE_VERSION_MINOR 4)
+    set(CPACK_PACKAGE_VERSION_PATCH 0)
+    set(CPACK_PACKAGE_INSTALL_DIRECTORY "Aruspix")
+    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE.txt")
+    set(CPACK_PACKAGE_EXECUTABLES "aruspix" "Aruspix")
+
+    # Short commit hash or vX.Y.Z tag, passed in by CI (see
+    # .github/workflows/build.yml); "dev" for a plain local build.
+    # Setting CPACK_PACKAGE_FILE_NAME explicitly, rather than leaving it
+    # to CPack's ${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION} default,
+    # also suppresses the "-win64" CPACK_SYSTEM_NAME suffix CPack would
+    # otherwise append.
+    set(AX_PACKAGE_VERSION "dev" CACHE STRING "Version suffix for the installer filename")
+    set(CPACK_PACKAGE_FILE_NAME "Aruspix_${AX_PACKAGE_VERSION}")
+
+    set(CPACK_GENERATOR "NSIS")
+    set(CPACK_NSIS_EXECUTABLES_DIRECTORY ".")
+    set(CPACK_NSIS_DISPLAY_NAME "Aruspix")
+    set(CPACK_NSIS_PACKAGE_NAME "Aruspix")
+    set(CPACK_NSIS_INSTALLED_ICON_NAME "aruspix.exe")
+    set(CPACK_NSIS_MUI_ICON "${CMAKE_SOURCE_DIR}/win32/ax.ico")
+    set(CPACK_NSIS_MUI_UNIICON "${CMAKE_SOURCE_DIR}/win32/ax.ico")
+    set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+    set(CPACK_NSIS_MODIFY_PATH OFF)
+
+    include(CPack)
+endif()
+
+# ---------------------------------------------------------------------------
+# macOS .app bundle
+#
+# Zipping the bundle for distribution is a plain CI step (see
+# .github/workflows/build.yml), not a CMake/CPack concern.
+# ---------------------------------------------------------------------------
+if(APPLE)
+    set_target_properties(aruspix PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_BUNDLE_NAME "Aruspix"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "net.aruspix.Aruspix"
+        MACOSX_BUNDLE_BUNDLE_VERSION "2.4.0"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "2.4.0"
+        MACOSX_BUNDLE_ICON_FILE "ax.icns"
+    )
+
+    install(TARGETS aruspix BUNDLE DESTINATION .)
+
+    # AxApp resolves resources via wxStandardPaths::GetResourcesDir(),
+    # i.e. Contents/Resources, on macOS (see m_resourcesPath in
+    # axapp.cpp), unlike Windows/Linux where they sit next to the
+    # executable.
+    install(DIRECTORY data/ DESTINATION Aruspix.app/Contents/Resources)
+    install(FILES osx/ax.icns DESTINATION Aruspix.app/Contents/Resources)
+endif()

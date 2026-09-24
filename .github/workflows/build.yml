@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [master]
   workflow_dispatch:
+  # Lets release.yml call this workflow's build/package logic on a v*
+  # tag push instead of duplicating it; this workflow no longer has
+  # its own tags trigger, so a plain push of a tag only runs it via
+  # that call, not twice.
+  workflow_call:
 
 jobs:
   build:
@@ -18,6 +23,23 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # Packages are named Aruspix_<version>.<ext>: the pushed tag when
+      # it's a release (vX.Y.Z, e.g. v0.0.1), otherwise the short commit
+      # hash (e.g. deadbeef). git rev-parse works fine on the shallow
+      # checkout above since it only needs HEAD's own commit object.
+      - name: Compute package version
+        id: version
+        shell: bash
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$REF_TYPE" = "tag" ] && [[ "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "version=$REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          fi
 
       # uuid is the only system library Aruspix links directly that Conan
       # doesn't see. Everything else (GTK, X11, xcb, OpenGL, ...) is
@@ -122,11 +144,13 @@ jobs:
       # to Win32 and produce an x86/x64 link mismatch.
       - name: Configure
         shell: bash
+        env:
+          AX_PACKAGE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            cmd //c "build\\Release\\generators\\conanbuild.bat && cmake --preset conan-release"
+            cmd //c "build\\Release\\generators\\conanbuild.bat && cmake --preset conan-release -DAX_PACKAGE_VERSION=$AX_PACKAGE_VERSION"
           else
-            cmake --preset conan-release
+            cmake --preset conan-release -DAX_PACKAGE_VERSION=$AX_PACKAGE_VERSION
           fi
 
       - name: Build
@@ -146,13 +170,214 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
             ls -lh build/Release/aruspix.exe
+          elif [ "$RUNNER_OS" = "macOS" ]; then
+            file build/Release/Aruspix.app/Contents/MacOS/aruspix
           else
             file build/Release/aruspix
           fi
 
+      # macOS's MACOSX_BUNDLE target has no loose build/Release/aruspix
+      # binary to speak of (see below); the .app bundle zip is its only
+      # artifact.
       - uses: actions/upload-artifact@v4
+        if: runner.os != 'macOS'
         with:
           name: aruspix-${{ runner.os }}-${{ runner.arch }}
-          path: build/Release/aruspix*
+          path: |
+            build/Release/aruspix*
+            !build/Release/Aruspix_*.exe
           if-no-files-found: error
           retention-days: 14
+
+      # windows-latest doesn't ship NSIS; Chocolatey does ship on the
+      # runner, so use it to install makensis and put it on PATH for
+      # the cpack step below.
+      - name: Install NSIS (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          choco install nsis -y --no-progress
+          echo "C:/Program Files (x86)/NSIS" >> "$GITHUB_PATH"
+
+      - name: Package installer (Windows)
+        if: runner.os == 'Windows'
+        # AX_PACKAGE_VERSION was already baked into CPackConfig.cmake
+        # by the Configure step above.
+        shell: bash
+        working-directory: build/Release
+        run: cpack -C Release
+
+      - name: Upload installer (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: aruspix-installer-${{ runner.os }}-${{ runner.arch }}
+          path: build/Release/Aruspix_*.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      # linuxdeploy bundles its own "appimage" output plugin (no
+      # separate appimagetool download needed); the gtk input plugin
+      # is a separate script that has to be discoverable on PATH.
+      # wxWidgets still links GTK/X11/etc. as dynamic system libraries
+      # even though Conan builds everything else statically (see the
+      # "Install system dependencies (Linux)" step above), so those
+      # need bundling for the AppImage to run on a foreign distro.
+      - name: Download linuxdeploy (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          curl -sL -o linuxdeploy.AppImage https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          curl -sL -o linuxdeploy-plugin-gtk.sh https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh
+          chmod +x linuxdeploy.AppImage linuxdeploy-plugin-gtk.sh
+
+      - name: Build AppImage (Linux)
+        if: runner.os == 'Linux'
+        # AppImage tooling normally mounts itself via FUSE, which
+        # isn't reliably present on the runner (newer Ubuntu dropped
+        # libfuse2 by default); extract-and-run instead. The gtk
+        # plugin can't auto-detect the GTK version wxWidgets actually
+        # uses (confirmed GTK 3 via conan graph info), so it has to be
+        # told explicitly.
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          DEPLOY_GTK_VERSION: "3"
+          AX_PACKAGE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p AppDir/usr/bin
+          cp build/Release/aruspix AppDir/usr/bin/
+          cp -r data/. AppDir/usr/bin/
+          PATH="$PWD:$PATH" ./linuxdeploy.AppImage \
+            --appdir AppDir \
+            --executable AppDir/usr/bin/aruspix \
+            --desktop-file linux/aruspix.desktop \
+            --icon-file data/logo.png \
+            --icon-filename aruspix \
+            --plugin gtk \
+            --output appimage
+          mv Aruspix-*.AppImage "Aruspix_${AX_PACKAGE_VERSION}.AppImage"
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: aruspix-AppImage-${{ runner.arch }}
+          path: Aruspix_*.AppImage
+          if-no-files-found: error
+          retention-days: 14
+
+      # cmake --build alone doesn't run install() rules, so the bundle
+      # in build/Release/ has no data/ or icon yet (see CMakeLists.txt)
+      # -- install to a clean prefix to materialize the full bundle
+      # before zipping it.
+      - name: Package app bundle (macOS)
+        if: runner.os == 'macOS'
+        run: cmake --install build/Release --prefix appdir
+
+      - name: Zip app bundle (macOS)
+        if: runner.os == 'macOS'
+        working-directory: appdir
+        env:
+          AX_PACKAGE_VERSION: ${{ steps.version.outputs.version }}
+        run: ditto -c -k --sequesterRsrc --keepParent Aruspix.app "../Aruspix_${AX_PACKAGE_VERSION}.zip"
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'macOS'
+        with:
+          name: aruspix-app-${{ runner.arch }}
+          path: Aruspix_*.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  license-drift:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Conan
+        run: pip install --upgrade "conan>=2.0,<3"
+
+      - name: Cache Conan packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.conan2
+          key: conan-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('conanfile.py', 'recipes/**/conanfile.py') }}
+          restore-keys: |
+            conan-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Detect Conan profile
+        run: conan profile detect --force
+
+      - name: Regenerate third-party notices
+        run: python3 tools/generate_third_party_notices.py
+
+      - name: Fail on drift
+        run: |
+          if ! git diff --quiet -- data/THIRD_PARTY_LICENSES.txt src/app/axthirdparty_generated.h; then
+            echo "::error::data/THIRD_PARTY_LICENSES.txt and/or src/app/axthirdparty_generated.h are out of date with conanfile.py."
+            echo "::error::Run 'python3 tools/generate_third_party_notices.py' locally and commit the result."
+            git diff -- data/THIRD_PARTY_LICENSES.txt src/app/axthirdparty_generated.h
+            exit 1
+          fi
+
+  comment-artifacts:
+    # Posts a comment linking each of the three
+    # packages so a reviewer can download and test them without
+    # digging through the run's Artifacts section themselves.
+    needs: build
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Build artifact links
+        id: links
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          artifacts=$(gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts" --jq '.artifacts')
+
+          link() {
+            id=$(echo "$artifacts" | jq -r --arg prefix "$1" '[.[] | select(.name | startswith($prefix))][0].id // empty')
+            if [ -n "$id" ]; then
+              echo "https://github.com/$REPO/actions/runs/$RUN_ID/artifacts/$id"
+            else
+              echo "_not built_"
+            fi
+          }
+
+          {
+            echo "body<<BODY_EOF"
+            echo "### Packaged builds for this run"
+            echo
+            echo "| Platform | Download |"
+            echo "| --- | --- |"
+            echo "| Windows (NSIS installer) | $(link "aruspix-installer-") |"
+            echo "| Linux (AppImage) | $(link "aruspix-AppImage-") |"
+            echo "| macOS (.app zip) | $(link "aruspix-app-") |"
+            echo
+            echo "Requires being signed in to GitHub. Artifacts expire after 14 days."
+            echo "BODY_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Find existing comment
+        uses: peter-evans/find-comment@v3
+        id: fc
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: "github-actions[bot]"
+          body-includes: "Packaged builds for this run"
+
+      - name: Create or update comment
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.fc.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body: ${{ steps.links.outputs.body }}
+          edit-mode: replace

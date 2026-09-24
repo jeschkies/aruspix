@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Aruspix
+Comment=Optical recognition, superimposition and collation of early music prints
+Exec=aruspix
+Icon=aruspix
+Categories=Graphics;Office;
+Terminal=false

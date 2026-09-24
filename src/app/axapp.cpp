@@ -19,6 +19,7 @@
 #include "wx/protocol/http.h"
 
 #include "axapp.h"
+#include "axthirdparty_generated.h"
 
 
 // Initialize statics
@@ -271,10 +272,10 @@ bool AxApp::OnInit()
 
 
 	m_appPath = wxFileName(wxStandardPaths::Get().GetExecutablePath()).GetPath (wxPATH_GET_VOLUME);
-#if defined(__WXMSW__)
-    m_resourcesPath = m_appPath;
-#else // OS X
+#if defined(__WXMAC__)
 	m_resourcesPath = wxStandardPaths::Get().GetResourcesDir();
+#else // Windows and Linux: resources live next to the executable
+    m_resourcesPath = m_appPath;
 #endif
 
 #if defined(__linux__)
@@ -616,29 +617,6 @@ AxAboutDlg::AxAboutDlg( wxWindow *parent, wxWindowID id, const wxString &title,
     const wxPoint &position, const wxSize& size, long style ) :
     wxDialog( parent, id, title, position, size, style )
 {
-    wxColour normal( 0, 192, 0 );
-    wxColour hover( 0, 125, 0 );  
-    wxHyperlinkCtrl *link1 = new wxHyperlinkCtrl( this, ID0_WXWIDGETS, "WxWidgets GUI Library", "http://www.wxwidgets.org" );
-    link1->SetNormalColour( normal );
-    link1->SetHoverColour( hover );
-    link1->SetVisitedColour( normal );
-    wxHyperlinkCtrl *link2 = new wxHyperlinkCtrl( this, ID0_TORCH, "Torch Machine-Learning Library", "http://www.torch.ch" );
-    link2->SetNormalColour( normal );
-    link2->SetHoverColour( hover );
-    link2->SetVisitedColour( normal );
-    wxHyperlinkCtrl *link3 = new wxHyperlinkCtrl( this, ID0_IM, "IM Digital Imaging Library", "http://www.tecgraf.puc-rio.br/im" );
-    link3->SetNormalColour( normal );
-    link3->SetHoverColour( hover );
-    link3->SetVisitedColour( normal );
-    wxHyperlinkCtrl *link4 = new wxHyperlinkCtrl( this, ID0_WG, "Wolfgang Music Notation Software", "http://www.winwg.com" );
-    link4->SetNormalColour( normal );
-    link4->SetHoverColour( hover );
-    link4->SetVisitedColour( normal );
-    wxHyperlinkCtrl *link5 = new wxHyperlinkCtrl( this, ID0_LIBMEI, "Libmei C++ library for MEI", "http://ddmal.music.mcgill.ca/libmei" );
-    link5->SetNormalColour( normal );
-    link5->SetHoverColour( hover );
-    link5->SetVisitedColour( normal );
-
     AboutDlgFunc( this, true );
     wxString str;
     this->GetTxAppVersion()->SetLabel( AxApp::s_version );
@@ -658,7 +636,19 @@ AxAboutDlg::AxAboutDlg( wxWindow *parent, wxWindowID id, const wxString &title,
     // trick for updating the scroll
     this->GetTxAppContributors()->SetInsertionPoint( 0 );
     this->GetTxAppContributors()->WriteText( "" );
-    
+
+    wxStringTokenizer thirdPartyTkz( THIRD_PARTY_CREDITS, ";" );
+    while ( thirdPartyTkz.HasMoreTokens() )
+    {
+        this->GetTxAppThirdParty()->AppendText( thirdPartyTkz.GetNextToken() );
+        if ( thirdPartyTkz.HasMoreTokens() ) {
+            this->GetTxAppThirdParty()->AppendText( "\n" );
+        }
+    }
+    // trick for updating the scroll
+    this->GetTxAppThirdParty()->SetInsertionPoint( 0 );
+    this->GetTxAppThirdParty()->WriteText( "" );
+
 
 #if defined(__WXMSW__)
     this->GetLogo()->SetBitmap( wxBitmap( wxGetApp().m_resourcesPath + "/logo.win.png" , wxBITMAP_TYPE_PNG ) );
