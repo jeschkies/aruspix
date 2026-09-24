@@ -3,10 +3,14 @@ name: Build
 on:
   push:
     branches: [master]
-    tags: ["v*"]
   pull_request:
     branches: [master]
   workflow_dispatch:
+  # Lets release.yml call this workflow's build/package logic on a v*
+  # tag push instead of duplicating it; this workflow no longer has
+  # its own tags trigger, so a plain push of a tag only runs it via
+  # that call, not twice.
+  workflow_call:
 
 jobs:
   build:
@@ -327,3 +331,67 @@ jobs:
             git diff -- data/THIRD_PARTY_LICENSES.txt src/app/axthirdparty_generated.h
             exit 1
           fi
+
+  comment-artifacts:
+    # Posts (or updates, on a later push to the same PR, via
+    # find-comment + create-or-update-comment rather than always
+    # creating a new one) a comment linking each of the three
+    # packages so a reviewer can download and test them without
+    # digging through the run's Artifacts section themselves.
+    # needs: build waits for every matrix leg, and by default that
+    # also means this is skipped if any leg failed -- deliberate,
+    # since there's nothing to point at then.
+    needs: build
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Build artifact links
+        id: links
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          artifacts=$(gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts" --jq '.artifacts')
+
+          link() {
+            id=$(echo "$artifacts" | jq -r --arg prefix "$1" '[.[] | select(.name | startswith($prefix))][0].id // empty')
+            if [ -n "$id" ]; then
+              echo "https://github.com/$REPO/actions/runs/$RUN_ID/artifacts/$id"
+            else
+              echo "_not built_"
+            fi
+          }
+
+          {
+            echo "body<<BODY_EOF"
+            echo "### Packaged builds for this run"
+            echo
+            echo "| Platform | Download |"
+            echo "| --- | --- |"
+            echo "| Windows (NSIS installer) | $(link "aruspix-installer-") |"
+            echo "| Linux (AppImage) | $(link "aruspix-AppImage-") |"
+            echo "| macOS (.app zip) | $(link "aruspix-app-") |"
+            echo
+            echo "Requires being signed in to GitHub. Artifacts expire after 14 days."
+            echo "BODY_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Find existing comment
+        uses: peter-evans/find-comment@v3
+        id: fc
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: "github-actions[bot]"
+          body-includes: "Packaged builds for this run"
+
+      - name: Create or update comment
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.fc.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body: ${{ steps.links.outputs.body }}
+          edit-mode: replace
