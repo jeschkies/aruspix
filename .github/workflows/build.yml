@@ -288,15 +288,6 @@ jobs:
           retention-days: 14
 
   license-drift:
-    # data/THIRD_PARTY_LICENSES.txt and src/app/axthirdparty_generated.h
-    # are generated from the Conan dependency graph (see
-    # tools/generate_third_party_notices.py). This job regenerates them
-    # and fails if that changes anything, which means conanfile.py's
-    # requirements moved without someone rerunning the script and
-    # committing the result. `conan graph info` only resolves the
-    # dependency graph, and the script covers all three shipped
-    # platforms from its own settings overrides, so this runs once on
-    # Linux rather than in the OS build matrix.
     runs-on: ubuntu-latest
 
     steps:
@@ -333,14 +324,9 @@ jobs:
           fi
 
   comment-artifacts:
-    # Posts (or updates, on a later push to the same PR, via
-    # find-comment + create-or-update-comment rather than always
-    # creating a new one) a comment linking each of the three
+    # Posts a comment linking each of the three
     # packages so a reviewer can download and test them without
     # digging through the run's Artifacts section themselves.
-    # needs: build waits for every matrix leg, and by default that
-    # also means this is skipped if any leg failed -- deliberate,
-    # since there's nothing to point at then.
     needs: build
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
