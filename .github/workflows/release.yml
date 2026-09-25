@@ -11,6 +11,15 @@ jobs:
   # "Compute package version" step names the packages after the tag
   # (e.g. Aruspix_v0.0.1.exe) without any extra wiring.
   package:
+    # build.yml's nested comment-artifacts job requests issues/pull-requests
+    # write (only actually used on pull_request runs); reusable-workflow
+    # calls validate every nested job's permission request statically, so
+    # without granting it here this tag-triggered call fails at startup
+    # even though comment-artifacts never runs for a tag push.
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
     uses: ./.github/workflows/build.yml
 
   publish:
